@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.9.34714.143
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NkFlightWeb", "NkFlightWeb\NkFlightWeb.csproj", "{BFBB0B55-40FB-4CB0-AEB0-BF8CD3D9612A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{BFBB0B55-40FB-4CB0-AEB0-BF8CD3D9612A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BFBB0B55-40FB-4CB0-AEB0-BF8CD3D9612A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BFBB0B55-40FB-4CB0-AEB0-BF8CD3D9612A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BFBB0B55-40FB-4CB0-AEB0-BF8CD3D9612A}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {A78A4A78-2DDC-43F6-A906-D0ADC571A6CE}
+	EndGlobalSection
+EndGlobal

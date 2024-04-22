@@ -1,0 +1,33 @@
+{
+  "Serilog": {
+    "Using": [ "Serilog.Sinks.Console", "Serilog.Sinks.File", "Serilog.AspNetCore" ],
+    "MinimumLevel": {
+      "Default": "Information",
+      "Override": {
+        "Microsoft": "Information",
+        "System": "Information",
+        "Microsoft.EntityFrameworkCore": "Warning",
+        "System.Net.Http.HttpClient": "Warning"
+      }
+    },
+    "WriteTo": [
+      {
+        "Name": "Console",
+        "Args": {
+          "encoding": "System.Text.Encoding::UTF8",
+          "outputTemplate": "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] <{ThreadId}> [{Level:u3}] {Message:lj}{NewLine}{Exception}"
+        }
+      },
+      {
+        "Name": "File",
+        "Args": {
+          "encoding": "System.Text.Encoding::UTF8",
+          "path": "logs/log.log",
+          "rollingInterval": "3",
+          "outputTemplate": "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff}] <{ThreadId}> [{Level:u3}] {Message:lj}{NewLine}{Exception}"
+        }
+      }
+    ],
+    "Enrich": [ "FromLogContext", "WithMachineName", "WithThreadId" ]
+  }
+}
