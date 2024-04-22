@@ -48,6 +48,7 @@ namespace NkFlightWeb.Service
         public async Task GetToken()
         {
             await BuildCity();
+            var count = 1;
             var tokenList = InitConfig.Get_TokenList();
             //解决5分钟超时 则去重新获取
             var passToken = tokenList.Where(n => n.PassTime.Value < DateTime.Now.AddMinutes(5)).ToList();
@@ -55,9 +56,9 @@ namespace NkFlightWeb.Service
             {
                 tokenList.Remove(token);
             }
-            if (tokenList == null || tokenList.Count < 5)
+            if (tokenList == null || tokenList.Count < count)
             {
-                while (tokenList.Count < 5 || tokenList.Exists(n => n.PassTime.Value < DateTime.Now.AddMinutes(5)))
+                while (tokenList.Count < count || tokenList.Exists(n => n.PassTime.Value < DateTime.Now.AddMinutes(5)))
                 {
                     var port = "6666";
 
@@ -88,6 +89,7 @@ namespace NkFlightWeb.Service
                             p.StandardInput.AutoFlush = true;
                             p.WaitForExit();//等待程序执行完退出进程
                             p.Close();
+                            Task.Delay(4000).Wait();
                             // --incognito
                         }
                         catch (Exception ex1)
@@ -122,12 +124,12 @@ namespace NkFlightWeb.Service
                                 var urls = new List<string> { request.Url };
                                 var cookiesList = await page.Context.CookiesAsync(urls);
 
-                                var cookie = cookiesList.FirstOrDefault(n => n.Name == "tokenData");
-                                var cookies = $"{cookie.Name}={cookie.Value};";
-                                /* foreach (var cookie in cookiesList)
-                                 {
-                                     cookies += $"{cookie.Name}={cookie.Value};";
-                                 }*/
+                                string cookies = "";
+
+                                foreach (var cookie in cookiesList)
+                                {
+                                    cookies += $"{cookie.Name}={cookie.Value};";
+                                }
                                 Log.Information($"{DateTime.Now}获取到token{cookiesList.Count}");
                                 TokenUserModel tokenModel = new TokenUserModel
                                 {
@@ -173,19 +175,19 @@ namespace NkFlightWeb.Service
                         //await defaultContext.CloseAsync();
                         await page.CloseAsync();
                         await browser.CloseAsync();
-                        /*  if (exLog)
-                          {
-                              await Task.Delay(5000);
-                              try
-                              {
-                                  DirectoryInfo di = new DirectoryInfo($"{userDataDir.Replace("\"", "")}\\default");
-                                  di.Delete(true);
-                              }
-                              catch (Exception ex2)
-                              {
-                                  var ss = ex2;
-                              }
-                          }*/
+                        if (exLog)
+                        {
+                            await Task.Delay(5000);
+                            try
+                            {
+                                DirectoryInfo di = new DirectoryInfo($"{userDataDir.Replace("\"", "")}\\default");
+                                di.Delete(true);
+                            }
+                            catch (Exception ex2)
+                            {
+                                var ss = ex2;
+                            }
+                        }
                     }
                 }
             }
@@ -309,8 +311,8 @@ namespace NkFlightWeb.Service
                 matchLoc = maxLoc;
                 Mat mask = wafer.Clone();
                 //画框显示
-                var clickX = matchLoc.X + 130;
-                var clickY = matchLoc.Y + 50;
+                var clickX = matchLoc.X + 135;
+                var clickY = matchLoc.Y + 37;
                 Cv2.Rectangle(mask, matchLoc, new Point(clickX, clickY), Scalar.Green, 2);
 
                 await page.Mouse.MoveAsync(clickX, clickY);
@@ -567,7 +569,8 @@ namespace NkFlightWeb.Service
             };
             var json = JsonConvert.SerializeObject(sourceQuery);
             var apiUrl = "https://www.spirit.com/api/prod-availability/api/availability/search";
-            var res = HttpHelper.HttpPostRetry(apiUrl, json, "application/json", retry: 10, timeOut: 3, headers: header, cookie: dbToken.Cookies);
+            //var res = HttpHelper.HttpPostRetry(apiUrl, json, "application/json", retry: 10, timeOut: 3, headers: header, cookie: dbToken.Cookies);
+            var res = await HttpPostAsync(apiUrl, json, "application/json", 3, headers: header, cookie: dbToken.Cookies);
             dynamic data = JsonConvert.DeserializeObject(res);
             var error = data.errors.ToString();
             if (string.IsNullOrWhiteSpace(error))
@@ -675,6 +678,53 @@ namespace NkFlightWeb.Service
                 throw new Exception("请稍后重试");
             }
             return priceList;
+        }
+
+        public async Task<string> HttpPostAsync(string url, string postData, string contentType, int timeOut = 30, Dictionary<string, string>? headers = null, string cookie = "")
+        {
+            postData = postData ?? "";
+            using (HttpClient client = new HttpClient(new HttpClientHandler() { UseCookies = false }))
+            {
+                client.Timeout = new TimeSpan(0, 0, timeOut);
+                if (headers != null)
+                {
+                    foreach (var header in headers)
+                    {
+                        if (header.Key.Contains("content-type"))
+                        {
+                            continue;
+                        }
+                        client.DefaultRequestHeaders.Add(header.Key, header.Value);
+                    }
+                }
+                if (!string.IsNullOrWhiteSpace(cookie))
+                {
+                    client.DefaultRequestHeaders.Add("Cookie", cookie);
+                }
+                using (HttpContent httpContent = new StringContent(postData, Encoding.UTF8))
+                {
+                    if (contentType != null)
+                        httpContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+
+                    HttpResponseMessage response = client.PostAsync(url, httpContent).Result;
+                    var cookies = "";
+                    foreach (var item in response.Headers)
+                    {
+                        if (item.Key == "Set-Cookie")
+                        {
+                            foreach (var co in item.Value)
+                            {
+                                cookies += $"{co};";
+                            }
+                        }
+                    }
+                    var tokenList = InitConfig.Get_TokenList();
+
+                    var dbToken = tokenList.OrderByDescending(n => n.UseTime).FirstOrDefault();
+                    dbToken.Cookies = cookies;
+                    return response.Content.ReadAsStringAsync().Result;
+                }
+            }
         }
     }
 }
