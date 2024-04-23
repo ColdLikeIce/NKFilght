@@ -324,8 +324,10 @@ namespace NkFlightWeb.Util
                 try
                 {
                     response = await base.SendAsync(request, cts.Token);
+                    Log.Error($"第{i}次请求返回状态码{response.IsSuccessStatusCode}");
                     if (response.IsSuccessStatusCode)
                     {
+                        Log.Error($"第{i}次请求成功");
                         return response;
                     }
                 }

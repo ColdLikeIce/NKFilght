@@ -6,7 +6,7 @@ namespace NkFlightWeb.Impl
 {
     public interface INkFlightDomain : IScopedDependency
     {
-        Task GetToken();
+        Task<bool> GetToken();
 
         Task<SearchAirtickets_Data> SearchAirtickets(SearchAirticketsInput dto);
     }

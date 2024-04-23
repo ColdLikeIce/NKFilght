@@ -24,12 +24,20 @@ namespace NkFlightWeb.Workers
                 var _domain = scope.ServiceProvider.GetRequiredService<INkFlightDomain>();
                 try
                 {
-                    await _domain.GetToken();
+                    var result = await _domain.GetToken();
+                    if (!result)
+                    {
+                        await Task.Delay(1 * 5 * 1000, stoppingToken);
+                        continue;
+                    }
                 }
                 catch (Exception ex)
                 {
                     Log.Error($"EarlyWarningWorker运行出错{ex.Message}");
+                    await Task.Delay(1 * 5 * 1000, stoppingToken);
+                    continue;
                 }
+
                 await Task.Delay(1 * 60 * 1000, stoppingToken);
             }
         }
