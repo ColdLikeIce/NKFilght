@@ -257,7 +257,7 @@ namespace NkFlightWeb.Util
 
         public static string HttpPostRetry(string url, string postData, string contentType, int retry = 5, int timeOut = 30, Dictionary<string, string>? headers = null, string cookie = "")
         {
-            HttpMessageHandler handler = new TimeoutHandler(retry, timeOut * 1000, false);
+            HttpMessageHandler handler = new TimeoutHandler(retry, timeOut * 1000, true);
             using (HttpClient httpClient = new HttpClient(handler))
             {
                 using (HttpContent httpContent = new StringContent(postData, Encoding.Default))

@@ -48,7 +48,7 @@ namespace NkFlightWeb.Service
         /// 获取token
         /// </summary>
         /// <returns></returns>
-        public async Task GetToken_old()
+        public async Task<bool> GetToken()
         {
             await BuildCity();
             var count = 1;
@@ -102,6 +102,9 @@ namespace NkFlightWeb.Service
                     await using var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new BrowserTypeConnectOverCDPOptions { SlowMo = 10 });
                     var defaultContext = browser.Contexts[0];
                     var page = defaultContext.Pages[0];
+                    // var response =  await page.GotoAsync(url);
+                    /*    var defaultContext = browser.Contexts[0];
+                        var page = defaultContext.Pages[0];*/
                     await Task.Delay(5000);
                     await DoRobot(page);
                     var toke = "";
@@ -109,7 +112,7 @@ namespace NkFlightWeb.Service
                     try
                     {
                         page.Response += listenerResonse;
-                        void listenerResonse(object sender, IResponse request)
+                        async void listenerResonse(object sender, IResponse request)
                         {
                             Log.Information($"{request.Url}");
                             if (request.Url.Contains("token"))
@@ -123,7 +126,7 @@ namespace NkFlightWeb.Service
                                 var expireTime = DateTime.Now.AddMinutes(15);
                                 var value = JsonConvert.SerializeObject(request.Request.Headers);
                                 var urls = new List<string> { request.Url };
-                                var cookiesList = page.Context.CookiesAsync(urls).Result;
+                                var cookiesList = await page.Context.CookiesAsync(urls);
 
                                 string cookies = "";
 
@@ -155,9 +158,9 @@ namespace NkFlightWeb.Service
                         {
                             await closeBtn?.ClickAsync();
                         }
-                        var onway = await page.QuerySelectorAsync("body > app-root > main > div.container > app-home-page > section.home-widget-section.breakout-full-width.ng-star-inserted > div > div > div > div > app-home-widget > div > div.home-widget-wrapper > form > div > div > div.home-widget.fare-selection > div.left > app-nk-dropdown > div > label > div");
-                        await onway.ClickAsync();
-                        await page.QuerySelectorAsync("#oneWay").Result.ClickAsync();
+                        /*   var onway = await page.QuerySelectorAsync("body > app-root > main > div.container > app-home-page > section.home-widget-section.breakout-full-width.ng-star-inserted > div > div > div > div > app-home-widget > div > div.home-widget-wrapper > form > div > div > div.home-widget.fare-selection > div.left > app-nk-dropdown > div > label > div");
+                           await onway.ClickAsync();
+                           await page.QuerySelectorAsync("#oneWay").Result.ClickAsync();*/
                         var toStationbtn = await page.QuerySelectorAsync(".toStation");
                         await toStationbtn?.ClickAsync();
                         var rand = new Random();
@@ -172,15 +175,17 @@ namespace NkFlightWeb.Service
                         {
                             await unBtn.ClickAsync();
                         }
-                        await Task.Delay(5000);
                         await DoRobot(page);
+
+                        await Task.Delay(10000);
                         Log.Information($"出来结果为{toke}");
                     }
                     catch (Exception ex)
                     {
-                        // exLog = true;
+                        exLog = true;
                         await DoRobot(page);
                         Log.Error($"获取token报错{ex.Message}");
+                        return false;
                     }
                     finally
                     {
@@ -203,9 +208,10 @@ namespace NkFlightWeb.Service
                     }
                 }
             }
+            return true;
         }
 
-        public async Task<bool> GetToken()
+        public async Task<bool> GetToken_old()
         {
             await BuildCity();
             var tokenList = InitConfig.Get_TokenList();
@@ -227,7 +233,7 @@ namespace NkFlightWeb.Service
                     page.Response += listenerResonse;
                     void listenerResonse(object sender, IResponse request)
                     {
-                        Log.Information($"{request.Url}");
+                        //Log.Information($"{request.Url}");
                         if (request.Url.Contains("api/availability/search"))
                         {
                             toke = "1";
@@ -254,7 +260,8 @@ namespace NkFlightWeb.Service
                             InitConfig.AddTokenList(tokenModel);
                         }
                     };
-                    await page.WaitForSelectorAsync(".toStation", new PageWaitForSelectorOptions { Timeout = 10000 });
+                    await DoRobot(page);
+                    await page.WaitForSelectorAsync(".toStation", new PageWaitForSelectorOptions { Timeout = 5000 });
                     var cookiesBtn = await page.QuerySelectorAsync("#onetrust-accept-btn-handler");
                     if (cookiesBtn != null)
                     {
@@ -286,12 +293,13 @@ namespace NkFlightWeb.Service
                     }
                     await Task.Delay(5000);
                     await DoRobot(page);
-                    return true;
+
                     Log.Information($"出来结果为{toke}");
+                    return true;
                 }
                 catch (Exception ex)
                 {
-                    // exLog = true;
+                    exLog = true;
 
                     Log.Error($"获取token报错{ex.Message}");
                     await DoRobot(page);
@@ -356,10 +364,7 @@ namespace NkFlightWeb.Service
                     var clickY = matchLoc.Y + 37;
                     Log.Information($"点击{clickX}【{clickY}】");
                     Cv2.Rectangle(mask, matchLoc, new Point(clickX, clickY), Scalar.Green, 2);
-                    await page.Mouse.MoveAsync(clickX, clickY);
-                    await page.Mouse.DownAsync();
-                    Task.Delay(15000).Wait();
-                    await page.Mouse.UpAsync();
+                    await page.Mouse.ClickAsync(clickX, clickY, new MouseClickOptions { Delay = 15000 });
                     Task.Delay(10000).Wait();
                 }
             }
@@ -550,12 +555,29 @@ namespace NkFlightWeb.Service
 
             var dbToken = tokenList.OrderByDescending(n => n.UseTime).FirstOrDefault();
             var header = JsonConvert.DeserializeObject<Dictionary<string, string>>(dbToken.Headers);
-
-            header.Add("origin", "https://www.spirit.com");
-            header.Add("sec-fetch-dest", "empty");
-            header.Add("sec-fetch-mode", "cors");
-            header.Add("sec-fetch-site", "same-origin");
-            header.Add("Connection", "keep-alive");
+            var newHeader = new Dictionary<string, string>();
+            List<string> containHeader = new List<string>
+            {
+                "authorization",
+                "user-agent",
+                "ocp-apim-subscription-key",
+                "content-type",
+                "referer",
+                "origin"
+            };
+            foreach (var h in header)
+            {
+                if (containHeader.Contains(h.Key))
+                {
+                    newHeader.Add(h.Key, h.Value);
+                }
+            }
+            newHeader.Add("origin", "https://www.spirit.com");
+            newHeader.Add("Accept-Encoding", "deflate");
+            /*   header.Add("sec-fetch-dest", "empty");
+               header.Add("sec-fetch-mode", "cors");
+               header.Add("sec-fetch-site", "same-origin");
+               header.Add("Connection", "keep-alive");*/
             // header.Add("referer", "https://www.spirit.com/book/flights");
             //header.Add("Host", "https://www.spirit.com");
             var s = JsonConvert.SerializeObject(header);
@@ -611,8 +633,10 @@ namespace NkFlightWeb.Service
             };
             var json = JsonConvert.SerializeObject(sourceQuery);
             var apiUrl = "https://www.spirit.com/api/prod-availability/api/availability/search";
-            var res = HttpPostRetry(apiUrl, json, "application/json", retry: 10, timeOut: 3, headers: header, cookie: dbToken.Cookies);
-            //var res = await HttpPostAsync(apiUrl, json, "application/json", 3, headers: header, cookie: dbToken.Cookies);
+            var ss4 = JsonConvert.SerializeObject(newHeader);
+            //var res2 = HttpHelper.PostAjaxData(apiUrl, json, Encoding.UTF8, newHeader);
+            //var res = HttpPostRetry(apiUrl, json, "application/json", retry: 10, timeOut: 5, headers: newHeader);
+            var res = await HttpHelper.HttpPostAsync(apiUrl, json, "application/json", 3, headers: newHeader, cookie: dbToken.Cookies);
             dynamic data = JsonConvert.DeserializeObject(res);
             var error = data.errors.ToString();
             if (string.IsNullOrWhiteSpace(error))
@@ -724,7 +748,7 @@ namespace NkFlightWeb.Service
 
         public static string HttpPostRetry(string url, string postData, string contentType, int retry = 5, int timeOut = 30, Dictionary<string, string>? headers = null, string cookie = "")
         {
-            HttpMessageHandler handler = new TimeoutHandler(retry, timeOut * 1000, false);
+            HttpMessageHandler handler = new TimeoutHandler(retry, timeOut * 1000, true);
             using (HttpClient httpClient = new HttpClient(handler))
             {
                 using (HttpContent httpContent = new StringContent(postData, Encoding.Default))
