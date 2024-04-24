@@ -386,7 +386,7 @@ namespace NkFlightWeb.Service
                     Cv2.Rectangle(mask, matchLoc, new Point(clickX, clickY), Scalar.Green, 2);
                     await page.Mouse.MoveAsync(clickX, clickY);
                     await page.Mouse.DownAsync();
-                    Task.Delay(2787).Wait();
+                    Task.Delay(11000).Wait();
                     await page.Mouse.UpAsync();
                     //await page.Mouse.ClickAsync(clickX, clickY, new MouseClickOptions { Delay = 15000 });
                     Task.Delay(10000).Wait();

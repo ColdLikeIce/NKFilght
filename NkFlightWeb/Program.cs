@@ -22,7 +22,7 @@ Log.Information("Starting LionAirl WebApi");
 // Add services to the container.
 builder.Services.AddControllers()
     .AddApiResult();
-//builder.Services.AddHostedService<GetTokenWorker>();
+builder.Services.AddHostedService<GetTokenWorker>();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
