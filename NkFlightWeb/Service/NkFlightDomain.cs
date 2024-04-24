@@ -213,6 +213,119 @@ namespace NkFlightWeb.Service
 
         public async Task<bool> GetToken()
         {
+            var port = "8989";
+
+            using var playwright = await Playwright.CreateAsync();
+            try
+            {
+                await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new BrowserTypeConnectOverCDPOptions { SlowMo = 10 });
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    var browserPath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+                    ProcessStartInfo psi = new ProcessStartInfo(browserPath);
+                    psi.Arguments = $" --remote-debugging-port={port} --user-data-dir=\"C:\\work\\chrome\"  --start-maximized  --incognito --new-window https://www.taobao.com";
+                    Process.Start(psi);
+                    await Task.Delay(2000);
+                }
+                catch (Exception ex1)
+                {
+                    Console.WriteLine("Error opening the browser: " + ex1.Message);
+                }
+            }
+            await using var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new BrowserTypeConnectOverCDPOptions { SlowMo = 10 });
+            var defaultContext = browser.Contexts[0];
+            var page = defaultContext.Pages[0];
+            var response = await page.GotoAsync(url, new PageGotoOptions { Timeout = 30000 });
+            var toke = "";
+            var exLog = false;
+            try
+            {
+                page.Response += listenerResonse;
+                async void listenerResonse(object sender, IResponse request)
+                {
+                    //Log.Information($"{request.Url}");
+                    if (request.Url.Contains("api/availability/search"))
+                    {
+                        toke = "1";
+                        var expire = request.Headers["expires"];
+                        var expireTime = DateTime.Now.AddMinutes(15);
+                        var value = JsonConvert.SerializeObject(request.Request.Headers);
+                        var urls = new List<string> { request.Url };
+                        var cookiesList = await page.Context.CookiesAsync(urls);
+                        string cookies = "";
+
+                        foreach (var cookie in cookiesList)
+                        {
+                            cookies += $"{cookie.Name}={cookie.Value};";
+                        }
+                        Log.Information($"{DateTime.Now}获取到token{cookiesList.Count}");
+                        TokenUserModel tokenModel = new TokenUserModel
+                        {
+                            PassTime = DateTime.Now.AddMinutes(15),
+                            UseTime = DateTime.Now,
+                            Headers = value,
+                            Cookies = cookies,
+                        };
+                        InitConfig.AddTokenList(tokenModel);
+                    }
+                };
+                await page.WaitForSelectorAsync("#onetrust-accept-btn-handler", new PageWaitForSelectorOptions { Timeout = 5000 });
+                var cookiesBtn = await page.QuerySelectorAsync("#onetrust-accept-btn-handler");
+                if (cookiesBtn != null)
+                {
+                    await cookiesBtn?.ClickAsync();
+                }
+                await Task.Delay(2000);
+                var closeBtn = await page.QuerySelectorAsync(".close");
+                if (closeBtn != null)
+                {
+                    await closeBtn?.ClickAsync();
+                }
+                var onway = await page.QuerySelectorAsync("body > app-root > main > div.container > app-home-page > section.home-widget-section.breakout-full-width.ng-star-inserted > div > div > div > div > app-home-widget > div > div.home-widget-wrapper > form > div > div > div.home-widget.fare-selection > div.left > app-nk-dropdown > div > label > div");
+                await onway.ClickAsync();
+                await page.QuerySelectorAsync("#oneWay").Result.ClickAsync();
+                await page.WaitForSelectorAsync(".toStation", new PageWaitForSelectorOptions { Timeout = 5000 });
+                var toStationbtn = await page.QuerySelectorAsync(".toStation");
+                await toStationbtn?.ClickAsync();
+                var rand = new Random();
+                await Task.Delay(1000);
+                var descBtn = await page.QuerySelectorAsync($".stationPickerDestDropdown > div > div > div.d-flex.flex-column.flex-wrap.ng-star-inserted > div:nth-child(1) > div > p");
+                await descBtn?.ClickAsync();
+
+                var subBtn = await page.QuerySelectorAsync(".btn-block");
+                await subBtn.ClickAsync();
+                var unBtn = await page.QuerySelectorAsync(".modal-btn");
+                if (unBtn != null)
+                {
+                    await unBtn.ClickAsync();
+                }
+                await Task.Delay(6000);
+
+                Log.Information($"出来结果为{toke}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                exLog = true;
+
+                Log.Error($"获取token报错{ex.Message}");
+                await DoRobot(page);
+
+                return false;
+            }
+            finally
+            {
+                //await defaultContext.CloseAsync();
+                await page.CloseAsync();
+                await browser.CloseAsync();
+            }
+        }
+
+        public async Task<bool> GetToken_play()
+        {
             var tokenList = InitConfig.Get_TokenList();
             var userDataDir = "D:\\work\\NF";
             //解决5分钟超时 则去重新获取
