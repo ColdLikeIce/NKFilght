@@ -33,5 +33,7 @@ namespace NkFlightWeb.Db
         public DbSet<BasParameter> BasParameter { get; set; }
         public DbSet<NkFromAirlCity> NkAirlCity { get; set; }
         public DbSet<NkToAirlCity> NkToAirlCity { get; set; }
+        public DbSet<NKJourney> NKJourney { get; set; }
+        public DbSet<NKSegment> NKSegment { get; set; }
     }
 }

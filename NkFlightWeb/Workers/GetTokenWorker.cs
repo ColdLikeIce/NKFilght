@@ -38,7 +38,7 @@ namespace NkFlightWeb.Workers
                     continue;
                 }
 
-                await Task.Delay(1 * 60 * 1000, stoppingToken);
+                await Task.Delay(1 * 10 * 1000, stoppingToken);
             }
         }
     }

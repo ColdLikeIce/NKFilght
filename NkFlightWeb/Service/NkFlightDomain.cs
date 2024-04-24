@@ -48,7 +48,7 @@ namespace NkFlightWeb.Service
         /// 获取token
         /// </summary>
         /// <returns></returns>
-        public async Task<bool> GetToken()
+        public async Task<bool> GetToken_old()
         {
             await BuildCity();
             var count = 1;
@@ -102,7 +102,7 @@ namespace NkFlightWeb.Service
                     await using var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new BrowserTypeConnectOverCDPOptions { SlowMo = 10 });
                     var defaultContext = browser.Contexts[0];
                     var page = defaultContext.Pages[0];
-                    // var response =  await page.GotoAsync(url);
+                    var response = await page.GotoAsync(url);
                     /*    var defaultContext = browser.Contexts[0];
                         var page = defaultContext.Pages[0];*/
                     await Task.Delay(5000);
@@ -114,7 +114,6 @@ namespace NkFlightWeb.Service
                         page.Response += listenerResonse;
                         async void listenerResonse(object sender, IResponse request)
                         {
-                            Log.Information($"{request.Url}");
                             if (request.Url.Contains("token"))
                             {
                                 Log.Information($"{request.Url}");
@@ -145,7 +144,7 @@ namespace NkFlightWeb.Service
                                 InitConfig.AddTokenList(tokenModel);
                             }
                         };
-                        await page.WaitForSelectorAsync(".toStation", new PageWaitForSelectorOptions { Timeout = 10000 });
+                        await page.WaitForSelectorAsync(".toStation", new PageWaitForSelectorOptions { Timeout = 6000 });
                         var cookiesBtn = await page.QuerySelectorAsync("#onetrust-accept-btn-handler");
                         if (cookiesBtn != null)
                         {
@@ -199,6 +198,7 @@ namespace NkFlightWeb.Service
                             {
                                 DirectoryInfo di = new DirectoryInfo($"{userDataDir.Replace("\"", "")}\\default");
                                 di.Delete(true);
+                                Log.Error($"删除文件");
                             }
                             catch (Exception ex2)
                             {
@@ -211,27 +211,38 @@ namespace NkFlightWeb.Service
             return true;
         }
 
-        public async Task<bool> GetToken_old()
+        public async Task<bool> GetToken()
         {
-            await BuildCity();
             var tokenList = InitConfig.Get_TokenList();
             var userDataDir = "D:\\work\\NF";
             //解决5分钟超时 则去重新获取
-            if (tokenList == null || tokenList.Exists(n => n.PassTime.Value < DateTime.Now.AddMinutes(5)) || tokenList.Count < 5)
+            var count = 1;
+            //解决5分钟超时 则去重新获取
+            var passToken = tokenList.Where(n => n.PassTime.Value < DateTime.Now.AddMinutes(5)).ToList();
+            foreach (var token in passToken)
+            {
+                tokenList.Remove(token);
+            }
+            if (tokenList == null || tokenList.Count < count)
             {
                 using var playwright = await Playwright.CreateAsync();
 
                 var args = new List<string>() { "--start-maximized", "--disable-blink-features=AutomationControlled" };
+
                 await using var browser = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, new BrowserTypeLaunchPersistentContextOptions
                 { Headless = false, Args = args.ToArray(), ViewportSize = ViewportSize.NoViewport, BypassCSP = true, SlowMo = 10, });
-                var page = await browser.NewPageAsync();
-                var response = await page.GotoAsync(url, new PageGotoOptions { Timeout = 300000 });
+
+                /* await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+                 { Headless = false, Args = args.ToArray(), SlowMo = 10, });
+                var context = await browser.NewContextAsync(new BrowserNewContextOptions { ViewportSize = ViewportSize.NoViewport });*/
+                var page = browser.Pages[0];
+                var response = await page.GotoAsync(url, new PageGotoOptions { Timeout = 200000 });
                 var toke = "";
                 var exLog = false;
                 try
                 {
                     page.Response += listenerResonse;
-                    void listenerResonse(object sender, IResponse request)
+                    async void listenerResonse(object sender, IResponse request)
                     {
                         //Log.Information($"{request.Url}");
                         if (request.Url.Contains("api/availability/search"))
@@ -241,8 +252,18 @@ namespace NkFlightWeb.Service
                             var expireTime = DateTime.Now.AddMinutes(15);
                             var value = JsonConvert.SerializeObject(request.Request.Headers);
                             var urls = new List<string> { request.Url };
-                            var cookiesList = page.Context.CookiesAsync(urls).Result;
-
+                            var cookiesList = await page.Context.CookiesAsync(urls);
+                            foreach (var item in request.Headers)
+                            {
+                                if (item.Key == "Set-Cookie")
+                                {
+                                    var coo = item.Value;
+                                    foreach (var key in coo)
+                                    {
+                                        Log.Information($"{key}");
+                                    }
+                                }
+                            }
                             string cookies = "";
 
                             foreach (var cookie in cookiesList)
@@ -280,19 +301,18 @@ namespace NkFlightWeb.Service
                     var toStationbtn = await page.QuerySelectorAsync(".toStation");
                     await toStationbtn?.ClickAsync();
                     var rand = new Random();
+                    await Task.Delay(1000);
                     var descBtn = await page.QuerySelectorAsync($".stationPickerDestDropdown > div > div > div.d-flex.flex-column.flex-wrap.ng-star-inserted > div:nth-child(1) > div > p");
                     await descBtn?.ClickAsync();
 
                     var subBtn = await page.QuerySelectorAsync(".btn-block");
                     await subBtn.ClickAsync();
-                    await DoRobot(page);
                     var unBtn = await page.QuerySelectorAsync(".modal-btn");
                     if (unBtn != null)
                     {
                         await unBtn.ClickAsync();
                     }
-                    await Task.Delay(5000);
-                    await DoRobot(page);
+                    await Task.Delay(10000);
 
                     Log.Information($"出来结果为{toke}");
                     return true;
@@ -360,17 +380,22 @@ namespace NkFlightWeb.Service
                     matchLoc = maxLoc;
                     Mat mask = wafer.Clone();
                     //画框显示
-                    var clickX = matchLoc.X + 20;
-                    var clickY = matchLoc.Y + 37;
+                    var clickX = matchLoc.X + 150;
+                    var clickY = matchLoc.Y + 50;
                     Log.Information($"点击{clickX}【{clickY}】");
                     Cv2.Rectangle(mask, matchLoc, new Point(clickX, clickY), Scalar.Green, 2);
-                    await page.Mouse.ClickAsync(clickX, clickY, new MouseClickOptions { Delay = 15000 });
+                    await page.Mouse.MoveAsync(clickX, clickY);
+                    await page.Mouse.DownAsync();
+                    Task.Delay(2787).Wait();
+                    await page.Mouse.UpAsync();
+                    //await page.Mouse.ClickAsync(clickX, clickY, new MouseClickOptions { Delay = 15000 });
                     Task.Delay(10000).Wait();
                 }
             }
             catch (Exception ex)
             {
-                var e = ex;
+                Log.Information($"处理机器人报错{ex.Message}");
+                throw ex;
             }
         }
 
@@ -379,7 +404,7 @@ namespace NkFlightWeb.Service
         /// </summary>
         /// <returns></returns>
 
-        private async Task BuildCity()
+        public async Task BuildCity()
         {
             var citys = await _repository.GetRepository<NkFromAirlCity>().Query().ToListAsync();
             if (citys.Count == 0)
@@ -409,8 +434,6 @@ namespace NkFlightWeb.Service
                 await using var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new BrowserTypeConnectOverCDPOptions { SlowMo = 10 });
                 var defaultContext = browser.Contexts[0];
                 var page = defaultContext.Pages[0];
-                List<NkFromAirlCity> fromCity = new List<NkFromAirlCity>();
-                List<NkToAirlCity> toCity = new List<NkToAirlCity>();
                 try
                 {
                     var response = await page.GotoAsync(url, new PageGotoOptions { Timeout = 300000 });
@@ -421,12 +444,24 @@ namespace NkFlightWeb.Service
                     var closeBtn = await page.QuerySelectorAsync(".close");
                     await closeBtn?.ClickAsync();
 
-                    await page.WaitForSelectorAsync(".toStation");
+                    var onway = await page.QuerySelectorAsync("body > app-root > main > div.container > app-home-page > section.home-widget-section.breakout-full-width.ng-star-inserted > div > div > div > div > app-home-widget > div > div.home-widget-wrapper > form > div > div > div.home-widget.fare-selection > div.left > app-nk-dropdown > div > label > div");
+                    await onway.ClickAsync();
+                    await page.QuerySelectorAsync("#oneWay").Result.ClickAsync();
+
                     var fromBtn = await page.QuerySelectorAsync(".fromStation");
                     await fromBtn?.ClickAsync();
+                    await page.WaitForSelectorAsync(".toStation");
                     var fromLocation = await page.QuerySelectorAllAsync("#widget > div.home-widget.ng-tns-c170-3 > div > div.home-widget.city-selection.ng-tns-c170-3.ng-star-inserted > div.city-selection.station-list.station-list-picker-origin.ng-tns-c170-3 > app-station-picker-dropdown > div > div > div.d-flex.flex-column.flex-wrap.ng-star-inserted >div");
-                    foreach (var item in fromLocation)
+                    for (int i = 1; i <= fromLocation.Count; i++)
                     {
+                        List<NkFromAirlCity> fromCity = new List<NkFromAirlCity>();
+                        List<NkToAirlCity> toCity = new List<NkToAirlCity>();
+                        var item = fromLocation[i];
+
+                        await fromBtn?.ClickAsync();
+
+                        await page.WaitForSelectorAsync(".toStation");
+                        await item.ClickAsync();
                         var p = await item.QuerySelectorAsync("p");
                         var cityText = await p.InnerHTMLAsync();
                         var h4 = await item.QuerySelectorAsync("h4");
@@ -443,30 +478,31 @@ namespace NkFlightWeb.Service
                             Log.Error($"需要特殊处理{cityText}");
                         }
                         fromCity.Add(city);
-                    }
-                    var toStationbtn = await page.QuerySelectorAsync(".toStation");
-                    await toStationbtn?.ClickAsync();
-                    var descLocation = await page.QuerySelectorAllAsync(".stationPickerDestDropdown > div > div > div.d-flex.flex-column.flex-wrap.ng-star-inserted > div");
-                    foreach (var item in descLocation)
-                    {
-                        var p = await item.QuerySelectorAsync("p");
-                        var cityText = await p.InnerHTMLAsync();
-                        var h4 = await item.QuerySelectorAsync("h4");
-                        var h5 = await h4.InnerHTMLAsync();
-                        //需要特殊处理
-                        NkToAirlCity city = new NkToAirlCity()
+                        var toStationbtn = await page.QuerySelectorAsync(".toStation");
+                        await toStationbtn?.ClickAsync();
+                        var descLocation = await page.QuerySelectorAllAsync(".stationPickerDestDropdown > div > div > div.d-flex.flex-column.flex-wrap.ng-star-inserted > div");
+                        foreach (var toItem in descLocation)
                         {
-                            city = cityText.Split(",").FirstOrDefault().Trim(),
-                            searchcity = h5.Trim()
-                        };
-                        if (h5.Contains("Airports"))
-                        {
-                            city.searchcity = await GetShortCity(city.city);
+                            var to_p = await toItem.QuerySelectorAsync("p");
+                            var to_cityText = await to_p.InnerHTMLAsync();
+                            var to_h4 = await toItem.QuerySelectorAsync("h4");
+                            var to_h5 = await to_h4.InnerHTMLAsync();
+                            //需要特殊处理
+                            NkToAirlCity tocity = new NkToAirlCity()
+                            {
+                                city = to_cityText.Split(",").FirstOrDefault().Trim(),
+                                searchcity = to_h5.Trim(),
+                                fromcity = city.city
+                            };
+                            if (to_h5.Contains("Airports"))
+                            {
+                                tocity.searchcity = await GetShortCity(tocity.city);
+                            }
+                            toCity.Add(tocity);
                         }
-                        toCity.Add(city);
+                        await _repository.GetRepository<NkFromAirlCity>().BatchInsertAsync(fromCity);
+                        await _repository.GetRepository<NkToAirlCity>().BatchInsertAsync(toCity);
                     }
-                    await _repository.GetRepository<NkFromAirlCity>().BatchInsertAsync(fromCity);
-                    await _repository.GetRepository<NkToAirlCity>().BatchInsertAsync(toCity);
                 }
                 catch (Exception ex)
                 {
@@ -479,6 +515,91 @@ namespace NkFlightWeb.Service
                     await browser.CloseAsync();
                 }
             }
+        }
+
+        public async Task<bool> PushAllFlightToDb(SearchDayDto dto)
+        {
+            var allFrom = await _repository.GetRepository<NkFromAirlCity>().QueryListAsync();
+            var AllTo = await _repository.GetRepository<NkToAirlCity>().QueryListAsync();
+            var date = DateTime.Now.AddDays(dto.day.Value);
+
+            var journeyRe = _repository.GetRepository<NKJourney>();
+            var segmentRe = _repository.GetRepository<NKSegment>();
+            foreach (var fcity in allFrom)
+            {
+                foreach (var tocity in AllTo)
+                {
+                    if (fcity.city == tocity.city)
+                    {
+                        continue;
+                    }
+                    StepDto stepDto = new StepDto()
+                    {
+                        startArea = fcity.city,
+                        endArea = tocity.city,
+                        adtSourceNum = dto.AtdNum,
+                        childSourceNum = dto.ChildNum,
+                        fromTime = date
+                    };
+                    var resList = await StepSearch(stepDto);
+                    if (resList.Count > 0)
+                    {
+                        using var transaction = await _repository.BeginTransactionAsync();
+                        NKJourney lionAirlJourney = new NKJourney
+                        {
+                            JourneyId = Guid.NewGuid(),
+                            TripType = (int)FlightSegmentType.OneWay,
+                            DepCity = fcity.city,
+                            ArrCity = tocity.city,
+                            DepTime = Convert.ToDateTime(date),
+                            Adult = dto.AtdNum,
+                            Child = dto.ChildNum,
+                            RequestTime = DateTime.Now
+                        };
+                        List<NKSegment> segments = new List<NKSegment>();
+                        List<string> rateCodes = resList.Select(n => n.RateCode).Distinct().ToList();
+                        var dbRegList = await segmentRe.Query().Where(n => rateCodes.Contains(n.RateCode)).ToListAsync();
+                        foreach (var item in resList)
+                        {
+                            foreach (var seg in item.FromSegments)
+                            {
+                                NKSegment segment = new NKSegment
+                                {
+                                    SegmentId = Guid.NewGuid(),
+                                    JourneyId = lionAirlJourney.JourneyId,
+                                    RateCode = item.RateCode,
+                                    Carrier = seg.Carrier,
+                                    Cabin = seg.Cabin,
+                                    CabinClass = (int)seg.CabinClass,
+                                    FlightNumber = seg.FlightNumber,
+                                    DepAirport = seg.DepAirport,
+                                    ArrAirport = seg.ArrAirport,
+                                    DepDate = seg.DepDate,
+                                    ArrDate = seg.ArrDate,
+                                    StopCities = seg.StopCities,
+                                    CodeShare = seg.CodeShare,
+                                    ShareCarrier = seg.ShareCarrier,
+                                    ShareFlightNumber = seg.ShareFlightNumber,
+                                    AircraftCode = seg.AircraftCode,
+                                    Group = seg.Group,
+                                    FareBasis = seg.FareBasis,
+                                    GdsType = seg.GdsType == null ? null : (int)seg.GdsType,
+                                    PosArea = seg.PosArea,
+                                    AirlinePnrCode = seg.AirlinePnrCode,
+                                    BaggageRule = seg.BaggageRule == null ? "" : JsonConvert.SerializeObject(seg.BaggageRule),
+                                };
+                                segments.Add(segment);
+                            }
+                        }
+                        await segmentRe.BatchDeleteAsync(dbRegList);
+                        await journeyRe.InsertAsync(lionAirlJourney);
+                        await segmentRe.BatchInsertAsync(segments);
+                        await transaction.CommitAsync();
+                        Log.Information($"{fcity.city}_{tocity.city}_{date}抓取到数据{resList.Count}条报价数据");
+                    }
+                }
+            }
+            return true;
         }
 
         private async Task<string> GetShortCity(string city)
@@ -547,8 +668,16 @@ namespace NkFlightWeb.Service
             return searchAirtickets_Data;
         }
 
+        /// <summary>
+        /// 搜价格接口
+        /// </summary>
+        /// <param name="stepDto"></param>
+        /// <returns></returns>
+        /// <exception cref="Exception"></exception>
         public async Task<List<SearchAirticket_PriceDetail>> StepSearch(StepDto stepDto)
         {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            stopwatch.Start();
             var adtNum = stepDto.adtSourceNum.Value;
             var childNum = stepDto.childSourceNum.Value;
             var tokenList = InitConfig.Get_TokenList();
@@ -557,14 +686,14 @@ namespace NkFlightWeb.Service
             var header = JsonConvert.DeserializeObject<Dictionary<string, string>>(dbToken.Headers);
             var newHeader = new Dictionary<string, string>();
             List<string> containHeader = new List<string>
-            {
-                "authorization",
-                "user-agent",
-                "ocp-apim-subscription-key",
-                "content-type",
-                "referer",
-                "origin"
-            };
+              {
+                  "authorization",
+                  "user-agent",
+                  "ocp-apim-subscription-key",
+                  "content-type",
+                  "referer",
+                  "origin"
+              };
             foreach (var h in header)
             {
                 if (containHeader.Contains(h.Key))
@@ -573,15 +702,8 @@ namespace NkFlightWeb.Service
                 }
             }
             newHeader.Add("origin", "https://www.spirit.com");
-            newHeader.Add("Accept-Encoding", "deflate");
-            /*   header.Add("sec-fetch-dest", "empty");
-               header.Add("sec-fetch-mode", "cors");
-               header.Add("sec-fetch-site", "same-origin");
-               header.Add("Connection", "keep-alive");*/
-            // header.Add("referer", "https://www.spirit.com/book/flights");
-            //header.Add("Host", "https://www.spirit.com");
-            var s = JsonConvert.SerializeObject(header);
-            var qq = JsonConvert.SerializeObject(tokenList);
+            //newHeader.Add("Accept-Encoding", "deflate");
+
             List<passengersType> types = new List<passengersType>();
             if (stepDto.adtSourceNum > 0)
             {
@@ -634,9 +756,8 @@ namespace NkFlightWeb.Service
             var json = JsonConvert.SerializeObject(sourceQuery);
             var apiUrl = "https://www.spirit.com/api/prod-availability/api/availability/search";
             var ss4 = JsonConvert.SerializeObject(newHeader);
-            //var res2 = HttpHelper.PostAjaxData(apiUrl, json, Encoding.UTF8, newHeader);
-            //var res = HttpPostRetry(apiUrl, json, "application/json", retry: 10, timeOut: 5, headers: newHeader);
-            var res = await HttpHelper.HttpPostAsync(apiUrl, json, "application/json", 3, headers: newHeader, cookie: dbToken.Cookies);
+            // var res = HttpHelper.HttpPostRetry(apiUrl, json, "application/json", retry: 10, timeOut: 5, headers: newHeader, cookie: dbToken.Cookies);
+            var res = HttpHelper.HttpOriginPost(apiUrl, json, header, dbToken.Cookies);
             dynamic data = JsonConvert.DeserializeObject(res);
             var error = data.errors.ToString();
             if (string.IsNullOrWhiteSpace(error))
@@ -743,63 +864,9 @@ namespace NkFlightWeb.Service
             {
                 throw new Exception("请稍后重试");
             }
+            stopwatch.Stop();
+            Log.Information($"获取{priceList.Count}条数据耗时{stopwatch.ElapsedMilliseconds}ms");
             return priceList;
-        }
-
-        public static string HttpPostRetry(string url, string postData, string contentType, int retry = 5, int timeOut = 30, Dictionary<string, string>? headers = null, string cookie = "")
-        {
-            HttpMessageHandler handler = new TimeoutHandler(retry, timeOut * 1000, true);
-            using (HttpClient httpClient = new HttpClient(handler))
-            {
-                using (HttpContent httpContent = new StringContent(postData, Encoding.Default))
-                {
-                    if (headers != null)
-                    {
-                        foreach (var header in headers)
-                        {
-                            if (header.Key.Contains("content-type"))
-                            {
-                                continue;
-                            }
-                            httpClient.DefaultRequestHeaders.Add(header.Key, header.Value);
-                        }
-                    }
-                    else
-                    {
-                        httpClient.DefaultRequestHeaders.Clear();
-                    }
-                    if (!string.IsNullOrEmpty(contentType))
-                        httpContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
-
-                    if (!string.IsNullOrWhiteSpace(cookie))
-                    {
-                        httpClient.DefaultRequestHeaders.Add("Cookie", cookie);
-                    }
-
-                    // httpClient.Timeout = new TimeSpan(0, 0, timeOut);
-                    HttpResponseMessage response = httpClient.PostAsync(url, httpContent).Result;
-                    var newcookies = "";
-                    foreach (var item in response.Headers)
-                    {
-                        if (item.Key == "Set-Cookie")
-                        {
-                            foreach (var co in item.Value)
-                            {
-                                newcookies += $"{co};";
-                            }
-                        }
-                    }
-                    if (!string.IsNullOrWhiteSpace(newcookies))
-                    {
-                        var tokenList = InitConfig.Get_TokenList();
-
-                        var dbToken = tokenList.OrderByDescending(n => n.UseTime).FirstOrDefault();
-
-                        dbToken.Cookies = newcookies;
-                    }
-                    return response.Content.ReadAsStringAsync().Result;
-                }
-            }
         }
     }
 }

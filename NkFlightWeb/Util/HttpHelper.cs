@@ -255,6 +255,48 @@ namespace NkFlightWeb.Util
             }
         }
 
+        public static string HttpOriginPost(string url, string data, Dictionary<string, string> headers, string cookies = "")
+        {
+            //创建http请求
+            HttpWebRequest httpWebRequest = (HttpWebRequest)HttpWebRequest.Create(url);
+            //字符串转换为字节码
+            byte[] bs = Encoding.UTF8.GetBytes(data);
+            //参数类型，这里是json类型
+            //还有别的类型如"application/x-www-form-urlencoded"
+            httpWebRequest.ContentType = "application/json;";
+            //参数数据长度
+            httpWebRequest.ContentLength = bs.Length;
+            httpWebRequest.KeepAlive = false;
+            httpWebRequest.UseDefaultCredentials = true;
+            httpWebRequest.ServicePoint.Expect100Continue = false;//important
+            //设置请求类型
+            httpWebRequest.Method = "POST";
+            if (headers != null)
+            {
+                foreach (var header in headers)
+                {
+                    httpWebRequest.Headers.Add(header.Key, header.Value);
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(cookies))
+            {
+                httpWebRequest.Headers.Add("Cookie", cookies);
+            }
+            //设置超时时间
+            httpWebRequest.Timeout = 20000;
+            //将参数写入请求地址中
+            httpWebRequest.GetRequestStream().Write(bs, 0, bs.Length);
+            //发送请求
+            HttpWebResponse httpWebResponse = (HttpWebResponse)httpWebRequest.GetResponse();
+            //读取返回数据
+            StreamReader streamReader = new StreamReader(httpWebResponse.GetResponseStream(), Encoding.UTF8);
+            string responseContent = streamReader.ReadToEnd();
+            streamReader.Close();
+            httpWebResponse.Close();
+            httpWebRequest.Abort();
+            return responseContent;
+        }
+
         public static string HttpPostRetry(string url, string postData, string contentType, int retry = 5, int timeOut = 30, Dictionary<string, string>? headers = null, string cookie = "")
         {
             HttpMessageHandler handler = new TimeoutHandler(retry, timeOut * 1000, true);

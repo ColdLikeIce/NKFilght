@@ -11,5 +11,6 @@ namespace NkFlightWeb.Entity
 
         public string city { get; set; }
         public string searchcity { get; set; }
+        public string fromcity { get; set; }
     }
 }
