@@ -452,11 +452,10 @@ namespace NkFlightWeb.Service
                     await fromBtn?.ClickAsync();
                     await page.WaitForSelectorAsync(".toStation");
                     var fromLocation = await page.QuerySelectorAllAsync("#widget > div.home-widget.ng-tns-c170-3 > div > div.home-widget.city-selection.ng-tns-c170-3.ng-star-inserted > div.city-selection.station-list.station-list-picker-origin.ng-tns-c170-3 > app-station-picker-dropdown > div > div > div.d-flex.flex-column.flex-wrap.ng-star-inserted >div");
-                    for (int i = 1; i <= fromLocation.Count; i++)
+                    foreach (var item in fromLocation)
                     {
                         List<NkFromAirlCity> fromCity = new List<NkFromAirlCity>();
                         List<NkToAirlCity> toCity = new List<NkToAirlCity>();
-                        var item = fromLocation[i];
 
                         await fromBtn?.ClickAsync();
 
