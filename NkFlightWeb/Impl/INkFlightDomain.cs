@@ -9,6 +9,18 @@ namespace NkFlightWeb.Impl
     {
         Task<bool> GetToken();
 
+        Task<SearchAirtickets_Data> SearchAirtickets(SearchAirticketsInput dto);
+
+        Task<Verification_Data> Verification(VerificationInput dto);
+
+        Task<CreateOrder_Data> CreateOrder(CreateOrderInput dto);
+
+        Task<CancelOrde_Data> CancelOrder(CancelOrderInput dto);
+
+        Task<QueryOrder_Data> QueryOrder(QueryOrderInput dto);
+
+        Task<PayVerification_Data> PayVerification(PayVerificationInput dto);
+
         /// <summary>
         /// 构建城市
         /// </summary>
@@ -16,7 +28,5 @@ namespace NkFlightWeb.Impl
         Task BuildCity();
 
         Task<bool> PushAllFlightToDb(SearchDayDto dto);
-
-        Task<SearchAirtickets_Data> SearchAirtickets(SearchAirticketsInput dto);
     }
 }

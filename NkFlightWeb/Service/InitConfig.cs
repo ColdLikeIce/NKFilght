@@ -43,5 +43,23 @@ namespace NkFlightWeb.Service
         {
             return tokenList;
         }
+
+        /// <summary>
+        /// 获取最新的passtime
+        /// </summary>
+        /// <returns></returns>
+        public static TokenUserModel Get_Token()
+        {
+            return tokenList.OrderByDescending(n => n.PassTime).FirstOrDefault();
+        }
+
+        /// <summary>
+        /// 获取最老的passtime
+        /// </summary>
+        /// <returns></returns>
+        public static TokenUserModel Get_OldToken()
+        {
+            return tokenList.OrderBy(n => n.PassTime).FirstOrDefault();
+        }
     }
 }

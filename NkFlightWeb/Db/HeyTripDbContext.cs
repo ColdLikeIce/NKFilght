@@ -1,9 +1,7 @@
 ﻿using CommonCore.EntityFramework.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.Extensions.Logging;
 using NkFlightWeb.Entity;
-using System.Reflection.Emit;
 
 namespace NkFlightWeb.Db
 {
@@ -28,12 +26,23 @@ namespace NkFlightWeb.Db
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.Entity<NKAirlSegment>()
+              .HasOne(b => b.AirlOrder)
+              .WithMany(x => x.Segment)
+              .HasForeignKey(b => b.OrderId);
+            modelBuilder.Entity<NKAirlPassenger>()
+              .HasOne(b => b.AirlOrder)
+              .WithMany(x => x.NKAirlPassenger)
+              .HasForeignKey(b => b.SupplierOrderId);
         }
 
         public DbSet<BasParameter> BasParameter { get; set; }
-        public DbSet<NkFromAirlCity> NkAirlCity { get; set; }
         public DbSet<NkToAirlCity> NkToAirlCity { get; set; }
         public DbSet<NKJourney> NKJourney { get; set; }
         public DbSet<NKSegment> NKSegment { get; set; }
+
+        public DbSet<NKAirlPassenger> NKAirlPassenger { get; set; }
+        public DbSet<NKAirlSegment> NKAirlSegment { get; set; }
+        public DbSet<NKFlightOrder> NKFlightOrder { get; set; }
     }
 }
