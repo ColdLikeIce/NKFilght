@@ -3,7 +3,7 @@
 namespace NkFlightWeb.Controllers
 {
     [ApiController]
-    [Route("[controller]")]
+    //[Route("[controller]")]
     [Produces("application/json")]
     public class BaseController : Controller
     {

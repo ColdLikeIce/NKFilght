@@ -383,9 +383,12 @@ namespace NkFlightWeb.Service
                 using var playwright = await Playwright.CreateAsync();
 
                 var args = new List<string>() { "--start-maximized", "--disable-blink-features=AutomationControlled" };
-
+                /*
+                                await using var browser = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, new BrowserTypeLaunchPersistentContextOptions
+                                { Headless = false, Args = args.ToArray(), ViewportSize = ViewportSize.NoViewport, BypassCSP = true, SlowMo = 10, });*/
+                var chromiunPath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
                 await using var browser = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, new BrowserTypeLaunchPersistentContextOptions
-                { Headless = false, Args = args.ToArray(), ViewportSize = ViewportSize.NoViewport, BypassCSP = true, SlowMo = 10, });
+                { Headless = false, Args = args.ToArray(), ViewportSize = ViewportSize.NoViewport, BypassCSP = true, SlowMo = 10, Devtools = false, ExecutablePath = chromiunPath });
                 var token = "";
                 var page = browser.Pages[0];
                 var response = await page.GotoAsync(url, new PageGotoOptions { Timeout = 200000 });
@@ -395,7 +398,11 @@ namespace NkFlightWeb.Service
                     page.Response += listenerResonse;
                     async void listenerResonse(object sender, IResponse request)
                     {
-                        //Log.Information($"{request.Url}");
+                        Log.Information($"{request.Url}");
+                        if (request.Url.Contains("token"))
+                        {
+                            Log.Information($"{request.Url}");
+                        }
                         if (request.Url.Contains("api/availability/search"))
                         {
                             var expire = request.Headers["expires"];
@@ -466,21 +473,22 @@ namespace NkFlightWeb.Service
                     //await defaultContext.CloseAsync();
 
                     await page.CloseAsync();
-                    if (exLog)
-                    {
-                        await Task.Delay(5000);
-                        try
-                        {
-                            DirectoryInfo di = new DirectoryInfo($"{userDataDir.Replace("\"", "")}\\default");
-                            di.Delete(true);
-                        }
-                        catch (Exception ex2)
-                        {
-                            var ss = ex2;
-                        }
-                    }
+                    /*  if (exLog)
+                      {
+                          await Task.Delay(5000);
+                          try
+                          {
+                              DirectoryInfo di = new DirectoryInfo($"{userDataDir.Replace("\"", "")}\\default");
+                              di.Delete(true);
+                          }
+                          catch (Exception ex2)
+                          {
+                              var ss = ex2;
+                          }
+                      }*/
                 }
             }
+
             return true;
         }
 
@@ -518,11 +526,24 @@ namespace NkFlightWeb.Service
                     var clickX = matchLoc.X + 150;
                     var clickY = matchLoc.Y + 50;
                     Log.Information($"点击{clickX}【{clickY}】");
+                    //Task.Delay(1000000000).Wait();
                     //Cv2.Rectangle(mask, matchLoc, new Point(clickX, clickY), Scalar.Green, 2);
+                    var sleepTime = 2000;
+
                     await page.Mouse.MoveAsync(clickX, clickY);
                     await page.Mouse.DownAsync();
-                    Task.Delay(11000).Wait();
+
+                    Task.Delay(100000).Wait();
                     await page.Mouse.UpAsync();
+                    /*while (sleepTime < 10000)
+                    {
+                        await page.Mouse.MoveAsync(clickX, clickY);
+                        await page.Mouse.DownAsync();
+                        Task.Delay(sleepTime).Wait();
+                        await page.Mouse.UpAsync();
+                        Task.Delay(3000).Wait();
+                        sleepTime += 500;
+                    }*/
                     //await page.Mouse.ClickAsync(clickX, clickY, new MouseClickOptions { Delay = 15000 });
                     Task.Delay(10000).Wait();
                 }
@@ -530,7 +551,6 @@ namespace NkFlightWeb.Service
             catch (Exception ex)
             {
                 Log.Information($"处理机器人报错{ex.Message}");
-                throw ex;
             }
         }
 
@@ -727,6 +747,7 @@ namespace NkFlightWeb.Service
                 }
                 catch (Exception ex)
                 {
+                    Log.Error($"已执行{AllTo.IndexOf(tocity)}条数据");
                     Log.Error($"{tocity.fromcity}_{tocity.city}_{date}获取失败 {ex.Message}");
                 }
             }
@@ -812,7 +833,7 @@ namespace NkFlightWeb.Service
             var adtNum = stepDto.adtSourceNum.Value;
             var childNum = stepDto.childSourceNum.Value;
             var tokenList = InitConfig.Get_TokenList();
-
+            var fromDate = stepDto.fromTime.Value.ToString("yyyy-MM-dd");
             var dbToken = InitConfig.Get_Token();
             var header = JsonConvert.DeserializeObject<Dictionary<string, string>>(dbToken.Headers);
             var newHeader = new Dictionary<string, string>();
@@ -886,8 +907,8 @@ namespace NkFlightWeb.Service
             var json = JsonConvert.SerializeObject(sourceQuery);
             var apiUrl = "https://www.spirit.com/api/prod-availability/api/availability/search";
             var ss4 = JsonConvert.SerializeObject(newHeader);
-            // var res = HttpHelper.HttpPostRetry(apiUrl, json, "application/json", retry: 10, timeOut: 5, headers: newHeader, cookie: dbToken.Cookies);
-            var res = HttpHelper.HttpOriginPost(apiUrl, json, header, dbToken.Cookies);
+            var res = HttpHelper.HttpPostRetry(apiUrl, json, "application/json", retry: 10, timeOut: 5, headers: newHeader, cookie: dbToken.Cookies);
+            // var res = HttpHelper.HttpOriginPost(apiUrl, json, header, dbToken.Cookies);
             dynamic data = JsonConvert.DeserializeObject(res);
 
             try
@@ -965,7 +986,7 @@ namespace NkFlightWeb.Service
                             };
                             model.Rule = rule;
                             model.DeliveryPolicy = "Standardproduct";
-                            var rateCode = $"NK_{stepDto.startArea}_{stepDto.endArea}_{stepDto.fromTime}";
+                            var rateCode = $"NK_{stepDto.startArea}_{stepDto.endArea}_{fromDate}";
                             List<SearchAirticket_Segment> segList = new List<SearchAirticket_Segment>();
                             foreach (var segment in journey.segments)
                             {
