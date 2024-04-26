@@ -50,7 +50,7 @@ namespace NkFlightWeb.Service
         /// <returns></returns>
         public static TokenUserModel Get_Token()
         {
-            return tokenList.OrderByDescending(n => n.PassTime).FirstOrDefault();
+            return tokenList.Where(n => n.PassTime.Value > DateTime.Now).OrderBy(n => n.UseTime).FirstOrDefault();
         }
 
         /// <summary>
