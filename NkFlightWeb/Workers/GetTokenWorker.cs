@@ -1,5 +1,6 @@
 ﻿using NkFlightWeb.Impl;
 using Serilog;
+using System.Diagnostics;
 
 namespace NkFlightWeb.Workers
 {
@@ -24,7 +25,11 @@ namespace NkFlightWeb.Workers
                 var _domain = scope.ServiceProvider.GetRequiredService<INkFlightDomain>();
                 try
                 {
+                    Stopwatch stopwatch = Stopwatch.StartNew();
+                    stopwatch.Start();
                     var result = await _domain.GetToken();
+                    stopwatch.Stop();
+                    Log.Information($"获取token{stopwatch.ElapsedMilliseconds}ms");
                     if (!result)
                     {
                         await Task.Delay(1 * 5 * 1000, stoppingToken);

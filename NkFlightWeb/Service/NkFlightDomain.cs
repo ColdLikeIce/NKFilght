@@ -121,7 +121,7 @@ namespace NkFlightWeb.Service
         /// 无头浏览器
         /// </summary>
         /// <returns></returns>
-        public async Task<bool> GetToken_cmd()
+        public async Task<bool> GetToken_notcache()
         {
             var tokenList = InitConfig.Get_TokenList();
             //解决5分钟超时 则去重新获取
@@ -160,7 +160,7 @@ namespace NkFlightWeb.Service
             return true;
         }
 
-        public async Task<bool> GetToken_play()
+        public async Task<bool> GetToken_2()
         {
             var userDataDir = "D:\\work\\NF";
 
@@ -169,13 +169,10 @@ namespace NkFlightWeb.Service
                 using var playwright = await Playwright.CreateAsync();
 
                 var args = new List<string>() { "--start-maximized", "--disable-blink-features=AutomationControlled" };
-                /*
-                                await using var browser = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, new BrowserTypeLaunchPersistentContextOptions
-                                { Headless = false, Args = args.ToArray(), ViewportSize = ViewportSize.NoViewport, BypassCSP = true, SlowMo = 10, });*/
                 var chromiunPath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
                 await using var browser = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, new BrowserTypeLaunchPersistentContextOptions
-                { Headless = false, Args = args.ToArray(), ViewportSize = ViewportSize.NoViewport, BypassCSP = true, SlowMo = 10, Devtools = false, ExecutablePath = chromiunPath });
-                var token = "";
+                { Headless = false, Args = args.ToArray(), ViewportSize = ViewportSize.NoViewport, BypassCSP = true, SlowMo = 10, ExecutablePath = chromiunPath });
+
                 var page = browser.Pages[0];
                 return await DoRunPage(page);
             }
@@ -190,7 +187,6 @@ namespace NkFlightWeb.Service
             var exLog = false;
             try
             {
-                var response = await page.GotoAsync(url, new PageGotoOptions { Timeout = 200000 });
                 page.Response += listenerResonse;
                 async void listenerResonse(object sender, IResponse request)
                 {
@@ -240,7 +236,10 @@ namespace NkFlightWeb.Service
                         Log.Error($"监听失败{ex.Message}");
                     }
                 };
-                await page.WaitForSelectorAsync(".toStation", new PageWaitForSelectorOptions { Timeout = 5000 });
+                var response = await page.GotoAsync(url, new PageGotoOptions { Timeout = 20000 });
+                await Task.Delay(3000);
+                await DoRobot(page, robotToken);
+                //await page.WaitForSelectorAsync(".toStation", new PageWaitForSelectorOptions { Timeout = 10000 });
                 var cookiesBtn = await page.QuerySelectorAsync("#onetrust-accept-btn-handler");
                 if (cookiesBtn != null)
                 {
@@ -261,7 +260,7 @@ namespace NkFlightWeb.Service
                 var subBtn = await page.QuerySelectorAsync(".btn-block");
                 await subBtn.ClickAsync(new ElementHandleClickOptions { Timeout = 2000 });
 
-                await Task.Delay(6000);
+                await Task.Delay(10000);
                 if (string.IsNullOrWhiteSpace(token) && robotToken.Count > 0)
                 {
                     await DoRobot(page, robotToken);
@@ -342,23 +341,27 @@ namespace NkFlightWeb.Service
         {
             try
             {
-                var sleepTime = 0;
-                Random random = new Random();
-                var ran = random.Next(40, 50);//random.Next(20, 50);
-                foreach (var tokenItem in token)
-                {
-                    var needTime = await GetSleepTime(tokenItem);
-                    Log.Information($"算出时间{needTime}ms");
-                    if (needTime > 0)
-                    {
-                        sleepTime = needTime + ran;
-                    }
-                }
                 var tip = await page.QuerySelectorAsync("#px-captcha-modal");
                 var dia = await page.QuerySelectorAsync("#px-captcha");
                 var title = await page.TitleAsync();
                 if (tip != null || dia != null || title.Contains("Access"))
                 {
+                    var sleepTime = 0;
+                    Random random = new Random();
+                    var ran = random.Next(20, 35);// random.Next(40, 43);//random.Next(20, 50);
+                    foreach (var tokenItem in token)
+                    {
+                        var needTime = await GetSleepTime(tokenItem);
+                        Log.Information($"算出时间{needTime}ms");
+                        if (needTime > 0)
+                        {
+                            sleepTime = needTime + ran;
+                        }
+                    }
+                    if (sleepTime == 0)
+                    {
+                        return;
+                    }
                     var srcPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "cf.jpg");
                     await page.ScreenshotAsync(new()
                     {
@@ -386,12 +389,13 @@ namespace NkFlightWeb.Service
                     Log.Information($"点击{clickX}【{clickY}】休眠【{sleepTime}】偏移量【{ran}】");
                     //Cv2.Rectangle(mask, matchLoc, new Point(clickX, clickY), Scalar.Green, 2);
 
+                    await page.Mouse.MoveAsync(0, 0);
                     await page.Mouse.MoveAsync(clickX, clickY);
                     await page.Mouse.DownAsync();
                     Task.Delay(sleepTime).Wait();
                     await page.Mouse.UpAsync();
                     //await page.Mouse.ClickAsync(clickX, clickY, new MouseClickOptions { Delay = sleepTime });
-                    Task.Delay(30000).Wait();
+                    Task.Delay(10000).Wait();
                 }
             }
             catch (Exception ex)
