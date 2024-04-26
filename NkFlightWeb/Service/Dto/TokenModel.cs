@@ -6,5 +6,6 @@
         public DateTime? UseTime { get; set; }
         public string? Headers { get; set; }
         public string? Cookies { get; set; }
+        public string? Token { get; set; }
     }
 }
