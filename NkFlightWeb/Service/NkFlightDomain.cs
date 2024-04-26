@@ -69,171 +69,60 @@ namespace NkFlightWeb.Service
         /// 获取token
         /// </summary>
         /// <returns></returns>
-        public async Task<bool> GetToken_old()
+        public async Task<bool> GetToken()
         {
-            var count = 1;
-            //解决5分钟超时 则去重新获取
+            if (!await JustToken())
+            {
+                var port = "5656";
 
-            var tokenList = InitConfig.Get_TokenList();
-            var passToken = tokenList.Where(n => n.PassTime.Value < DateTime.Now.AddMinutes(5)).ToList();
-            foreach (var token in passToken)
-            {
-                tokenList.Remove(token);
-            }
-            if (tokenList == null || tokenList.Count < count)
-            {
-                while (tokenList.Count < count || tokenList.Exists(n => n.PassTime.Value < DateTime.Now.AddMinutes(5)))
+                using var playwright = await Playwright.CreateAsync();
+                await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = false });
+
+                var userDataDir = "D:\\work\\NK";
+
+                try
                 {
-                    var port = "5656";
-
-                    using var playwright = await Playwright.CreateAsync();
-                    await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = false });
-
-                    var userDataDir = "D:\\work\\NK";
-
+                    await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new BrowserTypeConnectOverCDPOptions { SlowMo = 10 });
+                }
+                catch (Exception ex)
+                {
                     try
                     {
-                        await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new BrowserTypeConnectOverCDPOptions { SlowMo = 10 });
+                        //新的命令行
+                        var str = $"cd/d   C:\\Program Files\\Google\\Chrome\\Application\\ && chrome.exe --remote-debugging-port={port} --user-data-dir={userDataDir}  --start-maximized --new-window https://www.spirit.com";
+                        System.Diagnostics.Process p = new System.Diagnostics.Process();
+                        p.StartInfo.FileName = "cmd.exe";
+                        p.StartInfo.UseShellExecute = false;    //是否使用操作系统shell启动
+                        p.StartInfo.RedirectStandardInput = true;//接受来自调用程序的输入信息
+                        p.StartInfo.RedirectStandardOutput = true;//由调用程序获取输出信息
+                        p.StartInfo.RedirectStandardError = true;//重定向标准错误输出
+                        p.StartInfo.CreateNoWindow = true;//不显示程序窗口
+                        p.Start();//启动程序
+                        p.StandardInput.WriteLine(str + "&exit");
+                        p.StandardInput.AutoFlush = true;
+                        p.WaitForExit();//等待程序执行完退出进程
+                        p.Close();
+                        // --incognito
                     }
-                    catch (Exception ex)
+                    catch (Exception ex1)
                     {
-                        try
-                        {
-                            //新的命令行
-                            var str = $"cd/d   C:\\Program Files\\Google\\Chrome\\Application\\ && chrome.exe --remote-debugging-port={port} --user-data-dir={userDataDir}  --start-maximized --new-window https://www.spirit.com";
-                            System.Diagnostics.Process p = new System.Diagnostics.Process();
-                            p.StartInfo.FileName = "cmd.exe";
-                            p.StartInfo.UseShellExecute = false;    //是否使用操作系统shell启动
-                            p.StartInfo.RedirectStandardInput = true;//接受来自调用程序的输入信息
-                            p.StartInfo.RedirectStandardOutput = true;//由调用程序获取输出信息
-                            p.StartInfo.RedirectStandardError = true;//重定向标准错误输出
-                            p.StartInfo.CreateNoWindow = true;//不显示程序窗口
-                            p.Start();//启动程序
-                            p.StandardInput.WriteLine(str + "&exit");
-                            p.StandardInput.AutoFlush = true;
-                            p.WaitForExit();//等待程序执行完退出进程
-                            p.Close();
-                            // --incognito
-                        }
-                        catch (Exception ex1)
-                        {
-                            Console.WriteLine("Error opening the browser: " + ex1.Message);
-                        }
-                    }
-                    await using var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new BrowserTypeConnectOverCDPOptions { SlowMo = 10 });
-                    var defaultContext = browser.Contexts[0];
-                    var page = defaultContext.Pages[0];
-                    var response = await page.GotoAsync(url);
-                    /*    var defaultContext = browser.Contexts[0];
-                        var page = defaultContext.Pages[0];*/
-                    await Task.Delay(5000);
-                    await DoRobot(page);
-                    var toke = "";
-                    var exLog = false;
-                    try
-                    {
-                        page.Response += listenerResonse;
-                        async void listenerResonse(object sender, IResponse request)
-                        {
-                            if (request.Url.Contains("token"))
-                            {
-                                Log.Information($"{request.Url}");
-                            }
-                            if (request.Url.Contains("api/availability/search"))
-                            {
-                                var expire = request.Headers["expires"];
-                                var expireTime = DateTime.Now.AddMinutes(15);
-                                var value = JsonConvert.SerializeObject(request.Request.Headers);
-                                var urls = new List<string> { request.Url };
-                                var cookiesList = await page.Context.CookiesAsync(urls);
-
-                                string cookies = "";
-
-                                foreach (var cookie in cookiesList)
-                                {
-                                    cookies += $"{cookie.Name}={cookie.Value};";
-                                }
-                                Log.Information($"{DateTime.Now}获取到token{cookiesList.Count}");
-                                TokenUserModel tokenModel = new TokenUserModel
-                                {
-                                    PassTime = DateTime.Now.AddMinutes(15),
-                                    UseTime = DateTime.Now,
-                                    Headers = value,
-                                    Cookies = cookies,
-                                };
-                                InitConfig.AddTokenList(tokenModel);
-                            }
-                        };
-                        await page.WaitForSelectorAsync(".toStation", new PageWaitForSelectorOptions { Timeout = 6000 });
-                        var cookiesBtn = await page.QuerySelectorAsync("#onetrust-accept-btn-handler");
-                        if (cookiesBtn != null)
-                        {
-                            await cookiesBtn?.ClickAsync();
-                            //await page.WaitForSelectorAsync(".close");
-                        }
-                        await Task.Delay(2000);
-                        var closeBtn = await page.QuerySelectorAsync(".close");
-                        if (closeBtn != null)
-                        {
-                            await closeBtn?.ClickAsync();
-                        }
-                        /*   var onway = await page.QuerySelectorAsync("body > app-root > main > div.container > app-home-page > section.home-widget-section.breakout-full-width.ng-star-inserted > div > div > div > div > app-home-widget > div > div.home-widget-wrapper > form > div > div > div.home-widget.fare-selection > div.left > app-nk-dropdown > div > label > div");
-                           await onway.ClickAsync();
-                           await page.QuerySelectorAsync("#oneWay").Result.ClickAsync();*/
-                        var toStationbtn = await page.QuerySelectorAsync(".toStation");
-                        await toStationbtn?.ClickAsync();
-                        var rand = new Random();
-                        var descBtn = await page.QuerySelectorAsync($".stationPickerDestDropdown > div > div > div.d-flex.flex-column.flex-wrap.ng-star-inserted > div:nth-child(1) > div > p");
-                        await descBtn?.ClickAsync();
-
-                        var subBtn = await page.QuerySelectorAsync(".btn-block");
-                        await subBtn.ClickAsync();
-                        await DoRobot(page);
-                        var unBtn = await page.QuerySelectorAsync(".modal-btn");
-                        if (unBtn != null)
-                        {
-                            await unBtn.ClickAsync();
-                        }
-                        await DoRobot(page);
-
-                        await Task.Delay(10000);
-                        Log.Information($"出来结果为{toke}");
-                    }
-                    catch (Exception ex)
-                    {
-                        exLog = true;
-                        await DoRobot(page);
-                        Log.Error($"获取token报错{ex.Message}");
-                        return false;
-                    }
-                    finally
-                    {
-                        //await defaultContext.CloseAsync();
-                        await page.CloseAsync();
-                        await browser.CloseAsync();
-                        if (exLog)
-                        {
-                            await Task.Delay(5000);
-                            try
-                            {
-                                DirectoryInfo di = new DirectoryInfo($"{userDataDir.Replace("\"", "")}\\default");
-                                di.Delete(true);
-                                Log.Error($"删除文件");
-                            }
-                            catch (Exception ex2)
-                            {
-                                var ss = ex2;
-                            }
-                        }
+                        Console.WriteLine("Error opening the browser: " + ex1.Message);
                     }
                 }
+                await using var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new BrowserTypeConnectOverCDPOptions { SlowMo = 10 });
+                var defaultContext = browser.Contexts[0];
+                var page = defaultContext.Pages[0];
+                return await DoRunPage(page);
             }
             return true;
         }
 
+        /// <summary>
+        /// 无头浏览器
+        /// </summary>
+        /// <returns></returns>
         public async Task<bool> GetToken_cmd()
         {
-            var count = 5;
             var tokenList = InitConfig.Get_TokenList();
             //解决5分钟超时 则去重新获取
             var userDataDir = "D:\\work\\NF";
@@ -266,115 +155,12 @@ namespace NkFlightWeb.Service
                 var defaultContext = browser.Contexts[0];
                 var page = defaultContext.Pages[0];
                 var response = await page.GotoAsync(url, new PageGotoOptions { Timeout = 30000 });
-                var toke = "";
-                var exLog = false;
-                try
-                {
-                    page.Response += listenerResonse;
-                    async void listenerResonse(object sender, IResponse request)
-                    {
-                        //Log.Information($"{request.Url}");
-                        if (request.Url.Contains("api/availability/search"))
-                        {
-                            toke = "1";
-                            var expire = request.Headers["expires"];
-                            var expireTime = DateTime.Now.AddMinutes(15);
-                            var value = JsonConvert.SerializeObject(request.Request.Headers);
-                            var urls = new List<string> { request.Url };
-                            var cookiesList = await page.Context.CookiesAsync(urls);
-                            string cookies = "";
-                            foreach (var cookie in cookiesList)
-                            {
-                                cookies += $"{cookie.Name}={cookie.Value};";
-                            }
-                            var token = request.Request.Headers["authorization"];
-                            Log.Information($"{DateTime.Now}获取到token {token}");
-                            TokenUserModel tokenModel = new TokenUserModel
-                            {
-                                PassTime = DateTime.Now.AddMinutes(15),
-                                UseTime = DateTime.Now,
-                                Headers = value,
-                                Cookies = cookies,
-                            };
-                            InitConfig.AddTokenList(tokenModel);
-                            if (tokenList.Count > 0 && tokenList.FirstOrDefault().PassTime <= DateTime.Now)
-                            {
-                                Log.Error($"Warning token已过期{tokenList.FirstOrDefault().PassTime}");
-                            }
-                        }
-                    };
-                    await page.WaitForSelectorAsync("#onetrust-accept-btn-handler", new PageWaitForSelectorOptions { Timeout = 5000 });
-                    var cookiesBtn = await page.QuerySelectorAsync("#onetrust-accept-btn-handler");
-                    if (cookiesBtn != null)
-                    {
-                        await cookiesBtn?.ClickAsync();
-                    }
-                    await Task.Delay(2000);
-                    var closeBtn = await page.QuerySelectorAsync(".close");
-                    if (closeBtn != null)
-                    {
-                        await closeBtn?.ClickAsync();
-                    }
-                    await page.WaitForSelectorAsync(".btn-block", new PageWaitForSelectorOptions { Timeout = 5000 });
-                    var onway = await page.QuerySelectorAsync("body > app-root > main > div.container > app-home-page > section.home-widget-section.breakout-full-width.ng-star-inserted > div > div > div > div > app-home-widget > div > div.home-widget-wrapper > form > div > div > div.home-widget.fare-selection > div.left > app-nk-dropdown > div > label > div");
-                    await onway.ClickAsync();
-                    await page.QuerySelectorAsync("#oneWay").Result.ClickAsync();
-                    await page.WaitForSelectorAsync(".toStation", new PageWaitForSelectorOptions { Timeout = 5000 });
-                    var toStationbtn = await page.QuerySelectorAsync(".toStation");
-                    await toStationbtn?.ClickAsync();
-                    var rand = new Random();
-                    await Task.Delay(1000);
-                    var descBtn = await page.QuerySelectorAsync($".stationPickerDestDropdown > div > div > div.d-flex.flex-column.flex-wrap.ng-star-inserted > div:nth-child(1) > div > p");
-                    await descBtn?.ClickAsync();
-
-                    var subBtn = await page.QuerySelectorAsync(".btn-block");
-                    await subBtn.ClickAsync();
-                    var unBtn = await page.QuerySelectorAsync(".modal-btn");
-                    if (unBtn != null)
-                    {
-                        await unBtn.ClickAsync();
-                    }
-                    await Task.Delay(6000);
-                    if (string.IsNullOrWhiteSpace(toke))
-                    {
-                        exLog = true;
-                    }
-                    Log.Information($"出来结果为{toke}");
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    exLog = true;
-
-                    Log.Error($"获取token报错{ex.Message}");
-                    await DoRobot(page);
-
-                    return false;
-                }
-                finally
-                {
-                    //await defaultContext.CloseAsync();
-                    await page.CloseAsync();
-                    await browser.CloseAsync();
-                    if (exLog)
-                    {
-                        await Task.Delay(5000);
-                        try
-                        {
-                            DirectoryInfo di = new DirectoryInfo($"{userDataDir.Replace("\"", "")}\\default");
-                            di.Delete(true);
-                        }
-                        catch (Exception ex2)
-                        {
-                            var ss = ex2;
-                        }
-                    }
-                }
+                return await DoRunPage(page);
             }
             return true;
         }
 
-        public async Task<bool> GetToken()
+        public async Task<bool> GetToken_play()
         {
             var userDataDir = "D:\\work\\NF";
 
@@ -391,16 +177,36 @@ namespace NkFlightWeb.Service
                 { Headless = false, Args = args.ToArray(), ViewportSize = ViewportSize.NoViewport, BypassCSP = true, SlowMo = 10, Devtools = false, ExecutablePath = chromiunPath });
                 var token = "";
                 var page = browser.Pages[0];
+                return await DoRunPage(page);
+            }
+
+            return true;
+        }
+
+        public async Task<bool> DoRunPage(IPage page)
+        {
+            List<string> robotToken = new List<string>();
+            string token = "";
+            var exLog = false;
+            try
+            {
                 var response = await page.GotoAsync(url, new PageGotoOptions { Timeout = 200000 });
-                var exLog = false;
-                try
+                page.Response += listenerResonse;
+                async void listenerResonse(object sender, IResponse request)
                 {
-                    page.Response += listenerResonse;
-                    async void listenerResonse(object sender, IResponse request)
+                    try
                     {
-                        Log.Information($"{request.Url}");
                         if (request.Url.Contains("token"))
                         {
+                            Log.Information($"{request.Url}");
+                        }
+                        if (request.Url.Contains("/assets/js/bundle"))
+                        {
+                            var body = await request.JsonAsync();
+                            var json = body.ToString();
+                            dynamic obj = JsonConvert.DeserializeObject(json);
+                            var ob = Convert.ToString(obj.ob);
+                            robotToken.Add(ob);
                             Log.Information($"{request.Url}");
                         }
                         if (request.Url.Contains("api/availability/search"))
@@ -428,74 +234,126 @@ namespace NkFlightWeb.Service
 
                             Log.Information($"{DateTime.Now} tokenCount【 {InitConfig.Get_TokenList().Count}】  获取到token {token}");
                         }
-                    };
-                    await page.WaitForSelectorAsync(".toStation", new PageWaitForSelectorOptions { Timeout = 5000 });
-                    var cookiesBtn = await page.QuerySelectorAsync("#onetrust-accept-btn-handler");
-                    if (cookiesBtn != null)
-                    {
-                        await cookiesBtn?.ClickAsync();
-                        //await page.WaitForSelectorAsync(".close");
                     }
-                    await Task.Delay(1500);
-                    var closeBtn = await page.QuerySelectorAsync(".close");
-                    if (closeBtn != null)
+                    catch (Exception ex)
                     {
-                        await closeBtn?.ClickAsync();
+                        Log.Error($"监听失败{ex.Message}");
                     }
-                    await page.WaitForSelectorAsync(".toStation", new PageWaitForSelectorOptions { Timeout = 5000 });
-                    var toStationbtn = await page.QuerySelectorAsync(".toStation");
-                    await toStationbtn?.ClickAsync(new ElementHandleClickOptions { Timeout = 2000 });
-                    var descBtn = await page.QuerySelectorAsync($".stationPickerDestDropdown > div > div > div.d-flex.flex-column.flex-wrap.ng-star-inserted > div:nth-child(1) > div > p");
-                    await descBtn?.ClickAsync(new ElementHandleClickOptions { Timeout = 2000 });
-
-                    var subBtn = await page.QuerySelectorAsync(".btn-block");
-                    await subBtn.ClickAsync(new ElementHandleClickOptions { Timeout = 2000 });
-
-                    await Task.Delay(6000);
-                    if (string.IsNullOrWhiteSpace(token))
-                    {
-                        await DoRobot(page);
-                    }
-                    Log.Information($"出来结果为{token}");
-                    return true;
-                }
-                catch (Exception ex)
+                };
+                await page.WaitForSelectorAsync(".toStation", new PageWaitForSelectorOptions { Timeout = 5000 });
+                var cookiesBtn = await page.QuerySelectorAsync("#onetrust-accept-btn-handler");
+                if (cookiesBtn != null)
                 {
-                    exLog = true;
-
-                    Log.Error($"获取token报错{ex.Message}");
-                    await DoRobot(page);
-
-                    return false;
+                    await cookiesBtn?.ClickAsync();
                 }
-                finally
+                await Task.Delay(1500);
+                var closeBtn = await page.QuerySelectorAsync(".close");
+                if (closeBtn != null)
                 {
-                    //await defaultContext.CloseAsync();
-
-                    await page.CloseAsync();
-                    /*  if (exLog)
-                      {
-                          await Task.Delay(5000);
-                          try
-                          {
-                              DirectoryInfo di = new DirectoryInfo($"{userDataDir.Replace("\"", "")}\\default");
-                              di.Delete(true);
-                          }
-                          catch (Exception ex2)
-                          {
-                              var ss = ex2;
-                          }
-                      }*/
+                    await closeBtn?.ClickAsync();
                 }
+                await page.WaitForSelectorAsync(".toStation", new PageWaitForSelectorOptions { Timeout = 5000 });
+                var toStationbtn = await page.QuerySelectorAsync(".toStation");
+                await toStationbtn?.ClickAsync(new ElementHandleClickOptions { Timeout = 2000 });
+                var descBtn = await page.QuerySelectorAsync($".stationPickerDestDropdown > div > div > div.d-flex.flex-column.flex-wrap.ng-star-inserted > div:nth-child(1) > div > p");
+                await descBtn?.ClickAsync(new ElementHandleClickOptions { Timeout = 2000 });
+
+                var subBtn = await page.QuerySelectorAsync(".btn-block");
+                await subBtn.ClickAsync(new ElementHandleClickOptions { Timeout = 2000 });
+
+                await Task.Delay(6000);
+                if (string.IsNullOrWhiteSpace(token) && robotToken.Count > 0)
+                {
+                    await DoRobot(page, robotToken);
+                }
+                Log.Information($"出来结果为{token}");
+                return true;
             }
+            catch (Exception ex)
+            {
+                exLog = true;
 
-            return true;
+                Log.Error($"获取token报错{ex.Message}");
+                if (robotToken.Count > 0)
+                {
+                    Log.Information($"robotToken【{robotToken.Count}】");
+                    await DoRobot(page, robotToken);
+                }
+
+                return false;
+            }
+            finally
+            {
+                //await defaultContext.CloseAsync();
+
+                await page.CloseAsync();
+                /*  if (exLog)
+                  {
+                      await Task.Delay(5000);
+                      try
+                      {
+                          DirectoryInfo di = new DirectoryInfo($"{userDataDir.Replace("\"", "")}\\default");
+                          di.Delete(true);
+                      }
+                      catch (Exception ex2)
+                      {
+                          var ss = ex2;
+                      }
+                  }*/
+            }
         }
 
-        public async Task DoRobot(IPage page)
+        /// <summary>
+        /// js破解 人机进度条时间
+        /// </summary>
+        /// <param name="token"></param>
+        /// <returns></returns>
+        public async Task<int> GetSleepTime(string token)
+        {
+            byte[] data = System.Convert.FromBase64String(token);
+            var base64Decoded = System.Text.ASCIIEncoding.ASCII.GetString(data);
+
+            var secStr = await GetPt(base64Decoded, 122);
+            var secList = secStr.Split("|").ToList();
+            var contain = secList.Where(n => n.Contains("1oo11o")).FirstOrDefault();
+            if (contain == null)
+            {
+                return 0;
+            }
+            var iddex = secList.IndexOf(contain);
+            var fith = secList[iddex + 4].Split("_").LastOrDefault();
+            var result = await GetPt(fith, 10);
+            return Convert.ToInt32(result);
+        }
+
+        public async Task<string> GetPt(string s, int e)
+        {
+            var res = "";
+            for (var i = 0; i < s.Length; i++)
+            {
+                var cc = e ^ (int)s[i];
+                var app = Convert.ToChar(cc).ToString();
+                res += app;
+            }
+            return res;
+        }
+
+        public async Task DoRobot(IPage page, List<string> token)
         {
             try
             {
+                var sleepTime = 0;
+                Random random = new Random();
+                var ran = random.Next(40, 50);//random.Next(20, 50);
+                foreach (var tokenItem in token)
+                {
+                    var needTime = await GetSleepTime(tokenItem);
+                    Log.Information($"算出时间{needTime}ms");
+                    if (needTime > 0)
+                    {
+                        sleepTime = needTime + ran;
+                    }
+                }
                 var tip = await page.QuerySelectorAsync("#px-captcha-modal");
                 var dia = await page.QuerySelectorAsync("#px-captcha");
                 var title = await page.TitleAsync();
@@ -524,28 +382,16 @@ namespace NkFlightWeb.Service
                     Mat mask = wafer.Clone();
                     //画框显示
                     var clickX = matchLoc.X + 150;
-                    var clickY = matchLoc.Y + 50;
-                    Log.Information($"点击{clickX}【{clickY}】");
-                    //Task.Delay(1000000000).Wait();
+                    var clickY = matchLoc.Y + 25;
+                    Log.Information($"点击{clickX}【{clickY}】休眠【{sleepTime}】偏移量【{ran}】");
                     //Cv2.Rectangle(mask, matchLoc, new Point(clickX, clickY), Scalar.Green, 2);
-                    var sleepTime = 2000;
 
                     await page.Mouse.MoveAsync(clickX, clickY);
                     await page.Mouse.DownAsync();
-
-                    Task.Delay(100000).Wait();
+                    Task.Delay(sleepTime).Wait();
                     await page.Mouse.UpAsync();
-                    /*while (sleepTime < 10000)
-                    {
-                        await page.Mouse.MoveAsync(clickX, clickY);
-                        await page.Mouse.DownAsync();
-                        Task.Delay(sleepTime).Wait();
-                        await page.Mouse.UpAsync();
-                        Task.Delay(3000).Wait();
-                        sleepTime += 500;
-                    }*/
-                    //await page.Mouse.ClickAsync(clickX, clickY, new MouseClickOptions { Delay = 15000 });
-                    Task.Delay(10000).Wait();
+                    //await page.Mouse.ClickAsync(clickX, clickY, new MouseClickOptions { Delay = sleepTime });
+                    Task.Delay(30000).Wait();
                 }
             }
             catch (Exception ex)
