@@ -63,8 +63,7 @@ namespace NkFlightWeb.Service
         public static void AddTokenList(TokenUserModel token)
         {
             Log.Information($"rootbot:替换token【{token.PassTime}】【{tokenList.FirstOrDefault()?.PassTime}】");
-            tokenList = new List<TokenUserModel>();
-            tokenList.Add(token);
+            tokenList = new List<TokenUserModel>() { token };
         }
 
         /// <summary>

@@ -1,4 +1,5 @@
 ﻿using NkFlightWeb.Impl;
+using NkFlightWeb.Service;
 using Serilog;
 using System.Diagnostics;
 
@@ -29,21 +30,26 @@ namespace NkFlightWeb.Workers
                     stopwatch.Start();
                     var result = await _domain.GetToken();
                     stopwatch.Stop();
-                    Log.Information($"获取token{stopwatch.ElapsedMilliseconds}ms");
-                    if (!result)
+                    var s = 1;
+                    var token = InitConfig.Get_Token();
+                    if (token == null || token.PassTime < DateTime.Now.AddMinutes(3))
                     {
-                        await Task.Delay(1 * 5 * 1000, stoppingToken);
-                        continue;
+                        s = 1;
                     }
+                    else
+                    {
+                        var sleepTime = token.PassTime.Value - DateTime.Now.AddMinutes(3);
+                        s = Convert.ToInt32(sleepTime.TotalSeconds);
+                    }
+                    Log.Information($"获取token{stopwatch.ElapsedMilliseconds}ms准备休眠 {s} s");
+
+                    await Task.Delay(1 * s * 1000, stoppingToken);
                 }
                 catch (Exception ex)
                 {
                     Log.Error($"EarlyWarningWorker运行出错{ex.Message}");
-                    await Task.Delay(1 * 5 * 1000, stoppingToken);
                     continue;
                 }
-
-                await Task.Delay(1 * 10 * 1000, stoppingToken);
             }
         }
     }

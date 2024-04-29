@@ -7,7 +7,8 @@
         "Microsoft": "Information",
         "System": "Information",
         "Microsoft.EntityFrameworkCore": "Error",
-        "System.Net.Http.HttpClient": "Error"
+        "System.Net.Http.HttpClient": "Error",
+        "Microsoft.EntityFrameworkCore.Database.Command": "Warning"
       }
     },
     "WriteTo": [

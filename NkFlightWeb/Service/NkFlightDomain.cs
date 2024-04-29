@@ -193,23 +193,32 @@ namespace NkFlightWeb.Service
         {
             if (!await JustToken())
             {
-                using var playwright = await Playwright.CreateAsync();
-
-                var args = new List<string>() { "--start-maximized", "--disable-blink-features=AutomationControlled", "--no-sandbox" };
-                await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
-                {
-                    Args = args.ToArray(),
-                    Timeout = 120000,
-                    Headless = false,
-                    ChromiumSandbox = true,
-                    IgnoreDefaultArgs = new[] { "--enable-automation" },
-                    SlowMo = 100,
-                });
-                var page = await browser.NewPageAsync(new BrowserNewPageOptions { ViewportSize = ViewportSize.NoViewport });
-                return await DoRunPage(page);
+                return await BuildToken();
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// 构建token
+        /// </summary>
+        /// <returns></returns>
+        public async Task<bool> BuildToken()
+        {
+            using var playwright = await Playwright.CreateAsync();
+
+            var args = new List<string>() { "--start-maximized", "--disable-blink-features=AutomationControlled", "--no-sandbox" };
+            await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            {
+                Args = args.ToArray(),
+                Timeout = 120000,
+                Headless = false,
+                ChromiumSandbox = true,
+                IgnoreDefaultArgs = new[] { "--enable-automation" },
+                SlowMo = 100,
+            });
+            var page = await browser.NewPageAsync(new BrowserNewPageOptions { ViewportSize = ViewportSize.NoViewport });
+            return await DoRunPage(page);
         }
 
         #region 打开详情
@@ -560,7 +569,7 @@ namespace NkFlightWeb.Service
                             TokenUserModel tokenModel = new TokenUserModel
                             {
                                 PassTime = useTime.AddMinutes(intduring),
-                                UseTime = DateTime.Now,
+                                UseTime = useTime,
                                 Headers = value,
                                 Cookies = cookies,
                                 Token = token
@@ -1090,9 +1099,12 @@ namespace NkFlightWeb.Service
                                 Currency = data.data.currencyCode //(CurrencyEnums)Enum.Parse(typeof(CurrencyEnums), data.data.currencyCode)
                             };
                             var q = 1;
-                            decimal adultPrice = 0;
-                            decimal taxPrice = 0;
-
+                            decimal adtPrice = 0;
+                            decimal adtCount = 0;
+                            decimal adttaxPrice = 0;
+                            decimal childPrice = 0;
+                            decimal childCount = 0;
+                            decimal childtaxPrice = 0;
                             foreach (var fare in faresList)
                             {
                                 if (q > 1)
@@ -1100,14 +1112,31 @@ namespace NkFlightWeb.Service
                                     break;
                                 }
                                 q++;
-                                decimal.TryParse(fare.Value.details.passengerFares[0].fareAmount.ToString(), out adultPrice);
-                                decimal.TryParse(fare.Value.details.passengerFares[0].serviceCharges[1].amount.ToString(), out taxPrice);
+                                var passengerFares = fare.Value.details.passengerFares;
+                                foreach (var peo in passengerFares)
+                                {
+                                    if (peo.passengerType == "ADT")
+                                    {
+                                        decimal.TryParse(peo.fareAmount.ToString(), out adtPrice);
+                                        decimal.TryParse(peo.multiplier.ToString(), out adtCount);
+                                        decimal.TryParse(peo.serviceCharges[1].amount.ToString(), out adttaxPrice);
+                                    }
+                                    else if (peo.passengerType == "CHD")
+                                    {
+                                        decimal.TryParse(peo.fareAmount.ToString(), out childPrice);
+                                        decimal.TryParse(peo.multiplier.ToString(), out childCount);
+                                        decimal.TryParse(peo.serviceCharges[1].amount.ToString(), out childtaxPrice);
+                                    }
+                                }
                             }
-                            model.AdultPrice = adultPrice * adtNum;
-                            model.AdultTax = taxPrice * adtNum;
-                            model.ChildPrice = adultPrice * childNum;
-                            model.ChildTax = taxPrice * childNum;
+                            model.AdultPrice = adtPrice * adtCount;
+                            model.AdultTax = adttaxPrice * adtCount;
+                            model.ChildPrice = childPrice * childCount;
+                            model.ChildTax = childtaxPrice * childCount;
                             model.NationalityType = NationalityApplicableType.All;
+                            model.SuitAge = "0-120";
+                            model.MaxFittableNum = 9;
+                            model.MinFittableNum = 1;
                             model.TicketInvoiceType = 1; //没有默认1
                             model.TicketAirline = "NK";
                             List<AirticketRuleItem> refundRule = new List<AirticketRuleItem>();
@@ -1162,7 +1191,8 @@ namespace NkFlightWeb.Service
                                     CodeShare = segment.identifier.carrierCode == "NK" ? false : true,
                                     ShareCarrier = segment.identifier.carrierCode == "NK" ? "" : segment.identifier.carrierCode,
                                     ShareFlightNumber = segment.identifier.carrierCode == "NK" ? "" : segment.identifier.identifier,
-                                    AircraftCode = await GetAircraftCodeByEq(eq)
+                                    AircraftCode = await GetAircraftCodeByEq(eq),
+                                    BaggageRule = await BuildBaggageRule()
                                 };
                                 segList.Add(seg);
                                 rateCode += $"_{seg.Carrier}{seg.FlightNumber}_{Convert.ToDateTime(seg.DepDate).ToString("yyyyMMddHHmm")}";
@@ -1206,7 +1236,7 @@ namespace NkFlightWeb.Service
             return "A320";
         }
 
-        public async Task<dynamic> BuildApiRequest(string json)
+        public async Task<dynamic> BuildApiRequest(string json, int i = 0)
         {
             var tokenList = InitConfig.Get_TokenList();
             tokenList = tokenList.OrderBy(n => n.UseTime).ToList();
@@ -1216,71 +1246,24 @@ namespace NkFlightWeb.Service
                 {
                     var header = JsonConvert.DeserializeObject<Dictionary<string, string>>(dbToken.Headers);
                     header.Add("Accept-Encoding", "utf-8");
-                    var res = HttpOriginPost(apiUrl, json, header);
+                    var res = HttpHelper.HttpOriginPost(apiUrl, json, header);
                     dynamic data = JsonConvert.DeserializeObject(res);
-                    Log.Information($"Api:【{dbToken.PassTime}】");
-                    dbToken.UseTime = DateTime.Now;
+                    // dbToken.UseTime = DateTime.Now;
                     return data;
                 }
                 catch (Exception ex)
                 {
-                    Log.Error($"Api:请求发生错误，使用{dbToken.PassTime}出错{ex.Message}");
+                    Log.Error($"Api:请求发生错误，使用时间:{dbToken.UseTime}过期时间:{dbToken.PassTime}出错{ex.Message}");
+                    //当出现403 主动去获取token 重试3次
+                    if (ex.Message.Contains("403") && i < 3)
+                    {
+                        var token = await BuildToken();
+                        Log.Error($"Api:403主动获取token{token}");
+                        await BuildApiRequest(json, i++);
+                    }
                 }
             }
             return null;
-        }
-
-        public string HttpOriginPost(string url, string data, Dictionary<string, string> headers, string cookies = "")
-        {
-            //创建http请求
-            HttpWebRequest httpWebRequest = (HttpWebRequest)HttpWebRequest.Create(url);
-            //字符串转换为字节码
-            byte[] bs = Encoding.UTF8.GetBytes(data);
-            //参数类型，这里是json类型
-            //还有别的类型如"application/x-www-form-urlencoded"
-            httpWebRequest.ContentType = "application/json;";
-            //参数数据长度
-            httpWebRequest.ContentLength = bs.Length;
-            httpWebRequest.KeepAlive = false;
-            httpWebRequest.UseDefaultCredentials = true;
-            httpWebRequest.ServicePoint.Expect100Continue = false;//important
-            //设置请求类型
-            httpWebRequest.Method = "POST";
-            if (headers != null)
-            {
-                foreach (var header in headers)
-                {
-                    httpWebRequest.Headers.Add(header.Key, header.Value);
-                }
-            }
-            if (!string.IsNullOrWhiteSpace(cookies))
-            {
-                httpWebRequest.Headers.Add("Cookie", cookies);
-            }
-            //设置超时时间
-            httpWebRequest.Timeout = 20000;
-            //将参数写入请求地址中
-            httpWebRequest.GetRequestStream().Write(bs, 0, bs.Length);
-            //发送请求
-            HttpWebResponse httpWebResponse = (HttpWebResponse)httpWebRequest.GetResponse();
-            /*   foreach (var item in httpWebResponse.Headers)
-               {
-                   if (item.Key == "Set-Cookie")
-                   {
-                       var coo = item.Value;
-                       foreach (var key in coo)
-                       {
-                           Log.Information($"{key}");
-                       }
-                   }
-               }*/
-            //读取返回数据
-            StreamReader streamReader = new StreamReader(httpWebResponse.GetResponseStream(), Encoding.UTF8);
-            string responseContent = streamReader.ReadToEnd();
-            streamReader.Close();
-            httpWebResponse.Close();
-            httpWebRequest.Abort();
-            return responseContent;
         }
 
         /// <summary>
@@ -1501,6 +1484,14 @@ namespace NkFlightWeb.Service
             return res;
         }
 
+        public async Task<BaggageRule> BuildBaggageRule()
+        {
+            return new BaggageRule
+            {
+                HasBaggage = false
+            };
+        }
+
         /// <summary>
         /// 订单详情
         /// </summary>
@@ -1542,7 +1533,7 @@ namespace NkFlightWeb.Service
                     GdsType = se.GdsType,
                     PosArea = se.PosArea,
                     AirlinePnrCode = se.AirlinePnrCode,
-                    //BaggageRule = await BuildBaggageRule(se.Carrier)
+                    BaggageRule = await BuildBaggageRule()
                 };
                 segList.Add(seg);
             }
