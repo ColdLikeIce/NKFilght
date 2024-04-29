@@ -1151,7 +1151,7 @@ namespace NkFlightWeb.Service
                             List<SearchAirticket_Segment> segList = new List<SearchAirticket_Segment>();
                             foreach (var segment in journey.segments)
                             {
-                                var eq = segment.legs[0].legInfo.equipmentType;
+                                var eq = segment.legs[0].legInfo.equipmentType.ToString();
                                 SearchAirticket_Segment seg = new SearchAirticket_Segment()
                                 {
                                     Carrier = segment.identifier.carrierCode,
