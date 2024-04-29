@@ -13,6 +13,7 @@ using NkFlightWeb.Impl;
 using NkFlightWeb.Service.Dto;
 using NkFlightWeb.Util;
 using OpenCvSharp;
+using OpenCvSharp.Detail;
 using Qunar.Airtickets.Supplier.Concat.Dtos.Enums;
 using Qunar.Airtickets.Supplier.Concat.Dtos.Input;
 using Qunar.Airtickets.Supplier.Concat.Dtos.Models;
@@ -40,7 +41,7 @@ namespace NkFlightWeb.Service
         private readonly int tokenCount = 3;
         private readonly string apiUrl = "https://www.spirit.com/api/prod-availability/api/availability/search";
 
-        //private readonly string url = $"https://www.spirit.com/book/flights?tripType=oneWay&bookingType=flight&from=SJC&departDate={DateTime.Now.AddDays(3).ToString("yyyy-MM-dd")}&to=BQN&returnDate=&adt=1&chd=0&inf=0";
+        private readonly string detailurl = $"https://www.spirit.com/book/flights?tripType=oneWay&bookingType=flight&from=SJC&departDate={DateTime.Now.AddDays(3).ToString("yyyy-MM-dd")}&to=BQN&returnDate=&adt=1&chd=0&inf=0";
         private readonly string url = $"https://www.spirit.com";
 
         public NkFlightDomain(IBaseRepository<HeyTripDbContext> repository)
@@ -51,15 +52,8 @@ namespace NkFlightWeb.Service
         private async Task<bool> JustToken()
         {
             var tokenList = InitConfig.Get_TokenList();
-            //删除小于当前时间的token
-            var passToken = tokenList.Where(n => n.PassTime.Value < DateTime.Now.AddSeconds(30)).ToList();
-            foreach (var token in passToken)
-            {
-                tokenList.Remove(token);
-            }
             var oldToken = InitConfig.Get_OldToken();
-            var newToken = InitConfig.Get_Token();
-            if (tokenList.Count < 10 || oldToken == null || newToken == null || (oldToken.PassTime < DateTime.Now.AddMinutes(5) && newToken.PassTime < DateTime.Now.AddMinutes(10)))
+            if (tokenList.Count < 1 || oldToken == null || (oldToken.PassTime < DateTime.Now.AddMinutes(3) && tokenList.Count < 2))
             {
                 return false;
             }
@@ -70,7 +64,7 @@ namespace NkFlightWeb.Service
         /// 获取token
         /// </summary>
         /// <returns></returns>
-        public async Task<bool> GetToken_old()
+        public async Task<bool> GetToken1()
         {
             if (!await JustToken())
             {
@@ -122,15 +116,15 @@ namespace NkFlightWeb.Service
         /// 无头浏览器
         /// </summary>
         /// <returns></returns>
-        public async Task<bool> GetToken_cmd()
+        public async Task<bool> GetToken_cms()
         {
             var tokenList = InitConfig.Get_TokenList();
             //解决5分钟超时 则去重新获取
-            //var userDataDir = "D:\\work\\NF";
+            var userDataDir = "D:\\work\\NF";
             if (!await JustToken())
             {
                 Log.Information($"尝试获取token过期时间为{tokenList.FirstOrDefault()?.PassTime}");
-                var port = "8989";
+                var port = "9898";
 
                 using var playwright = await Playwright.CreateAsync();
                 try
@@ -143,8 +137,8 @@ namespace NkFlightWeb.Service
                     {
                         var browserPath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
                         ProcessStartInfo psi = new ProcessStartInfo(browserPath);
-                        //psi.Arguments = $" --remote-debugging-port={port} --user-data-dir=\"{userDataDir}\"  --start-maximized  --incognito --new-window https://www.taobao.com";
-                        psi.Arguments = $" --remote-debugging-port={port}  --start-maximized  --incognito --new-window https://www.taobao.com";
+                        psi.Arguments = $" --remote-debugging-port={port} --user-data-dir=\"{userDataDir}\"  --start-maximized  --incognito --new-window https://www.taobao.com";
+                        //psi.Arguments = $" --remote-debugging-port={port}  --start-maximized  --incognito --new-window https://www.taobao.com";
 
                         Process.Start(psi);
                         await Task.Delay(2000);
@@ -157,7 +151,6 @@ namespace NkFlightWeb.Service
                 await using var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new BrowserTypeConnectOverCDPOptions { SlowMo = 10 });
                 var defaultContext = browser.Contexts[0];
                 var page = defaultContext.Pages[0];
-                var response = await page.GotoAsync(url, new PageGotoOptions { Timeout = 30000 });
                 return await DoRunPage(page);
             }
             return true;
@@ -167,7 +160,7 @@ namespace NkFlightWeb.Service
         /// 打开 浏览器 指定路径 和 缓存
         /// </summary>
         /// <returns></returns>
-        public async Task<bool> GetToken_2()
+        public async Task<bool> GetToken2()
         {
             var userDataDir = "D:\\work\\NF";
 
@@ -176,10 +169,12 @@ namespace NkFlightWeb.Service
                 using var playwright = await Playwright.CreateAsync();
 
                 var args = new List<string>() { "--start-maximized", "--disable-blink-features=AutomationControlled" };
+                if (!InitConfig.GetFirst())
+                {
+                    args.Add("--incognito");
+                    InitConfig.setFirst();
+                }
                 var chromiunPath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
-                /* await using var browser = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, new BrowserTypeLaunchPersistentContextOptions
-                 { Headless = false, Args = args.ToArray(), ViewportSize = ViewportSize.NoViewport, BypassCSP = true, SlowMo = 10, ExecutablePath = chromiunPath });
-                 */
                 await using var browser = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, new BrowserTypeLaunchPersistentContextOptions
                 { Headless = false, Args = args.ToArray(), ViewportSize = ViewportSize.NoViewport, BypassCSP = true, SlowMo = 10, ExecutablePath = chromiunPath });
 
@@ -200,82 +195,55 @@ namespace NkFlightWeb.Service
             {
                 using var playwright = await Playwright.CreateAsync();
 
-                var args = new List<string>() { "--start-maximized", "--disable-blink-features=AutomationControlled" };
+                var args = new List<string>() { "--start-maximized", "--disable-blink-features=AutomationControlled", "--no-sandbox" };
                 await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
                 {
                     Args = args.ToArray(),
                     Timeout = 120000,
-                    Headless = false
+                    Headless = false,
+                    ChromiumSandbox = true,
+                    IgnoreDefaultArgs = new[] { "--enable-automation" },
+                    SlowMo = 100,
                 });
                 var page = await browser.NewPageAsync(new BrowserNewPageOptions { ViewportSize = ViewportSize.NoViewport });
-                return await DoRunPage_new(browser, page);
+                return await DoRunPage(page);
             }
 
             return true;
         }
 
-        /// <summary>
-        /// 正常操作按钮
-        /// </summary>
-        /// <param name="page"></param>
-        /// <returns></returns>
-        public async Task DoClick(IPage page, bool isSec = false)
+        #region 打开详情
+
+        public async Task<bool> GetToken_5()
         {
-            try
-            {
-                var imgPath2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"pass_{DateTime.Now.ToString("yyyyMMddHHmmss")}.jpg");
-                var title = await page.TitleAsync();
-                if (title.Contains("Access"))
-                {
-                    return;
-                }
-                await page.ScreenshotAsync(new PageScreenshotOptions { Path = imgPath2 });
-                if (isSec)
-                {
-                    await Task.Delay(3000);
-                }
-                var cookiesBtn = await page.QuerySelectorAsync("#onetrust-accept-btn-handler");
-                if (cookiesBtn != null)
-                {
-                    await cookiesBtn?.ClickAsync();
-                }
-                await Task.Delay(1500);
-                var closeBtn = await page.QuerySelectorAsync(".close");
-                if (closeBtn != null)
-                {
-                    await closeBtn?.ClickAsync();
-                }
-                await page.WaitForSelectorAsync(".toStation", new PageWaitForSelectorOptions { Timeout = 5000 });
-                var toStationbtn = await page.QuerySelectorAsync(".toStation");
-                await toStationbtn?.ClickAsync(new ElementHandleClickOptions { Timeout = 2000 });
-                var descBtn = await page.QuerySelectorAsync($".stationPickerDestDropdown > div > div > div.d-flex.flex-column.flex-wrap.ng-star-inserted > div:nth-child(1) > div > p");
-                await descBtn?.ClickAsync(new ElementHandleClickOptions { Timeout = 2000 });
+            var userDataDir = "D:\\work\\NF";
 
-                var subBtn = await page.QuerySelectorAsync(".btn-block");
-                await subBtn.ClickAsync(new ElementHandleClickOptions { Timeout = 2000 });
-
-                await Task.Delay(7000);
-            }
-            catch (Exception ex)
+            if (!await JustToken())
             {
-                if (!isSec)
-                {
-                    throw ex;
-                }
-                else
-                {
-                    Log.Information($"rootbot:人机识别后还是报错了");
-                }
+                using var playwright = await Playwright.CreateAsync();
+
+                var args = new List<string>() { "--start-maximized", "--disable-blink-features=AutomationControlled ", "--incognito" };
+                var chromiunPath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+                /* await using var browser = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, new BrowserTypeLaunchPersistentContextOptions
+                 { Headless = false, Args = args.ToArray(), ViewportSize = ViewportSize.NoViewport, BypassCSP = true, SlowMo = 10, ExecutablePath = chromiunPath });
+                 */
+                await using var browser = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, new BrowserTypeLaunchPersistentContextOptions
+                { Headless = false, Args = args.ToArray(), ViewportSize = ViewportSize.NoViewport, BypassCSP = true, SlowMo = 500, ExecutablePath = chromiunPath });
+
+                var page = browser.Pages[0];
+                return await NewDoRunPage(page);
             }
+
+            return true;
         }
 
-        public async Task<bool> DoRunPage_new(IBrowser browser, IPage page)
+        public async Task<bool> NewDoRunPage(IPage page)
         {
             List<string> robotToken = new List<string>();
             string token = "";
             var exLog = false;
-            var min = 20;
-            var max = 50;
+            var min = 40;
+            var max = 45;
             try
             {
                 page.Response += listenerResonse;
@@ -293,7 +261,6 @@ namespace NkFlightWeb.Service
                         }
                         if (request.Url.Contains("api/availability/search"))
                         {
-                            var expire = request.Headers["expires"];
                             var expireTime = DateTime.Now.AddMinutes(15);
                             var value = JsonConvert.SerializeObject(request.Request.Headers);
                             var urls = new List<string> { request.Url };
@@ -322,14 +289,13 @@ namespace NkFlightWeb.Service
                         Log.Error($"rootbot:监听失败{ex.Message}");
                     }
                 };
-                var response = await page.GotoAsync(url, new PageGotoOptions { Timeout = 120000 });
+                var response = await page.GotoAsync(detailurl, new PageGotoOptions { Timeout = 120000 });
                 await Task.Delay(3000);
-                var isRobot = await DoRobot(page, robotToken, min, max);
+                var isRobot = await NewDoRobot(page, robotToken, min, max);
                 if (!isRobot)
                 {
-                    await DoClick(page);
+                    await NewDoClick(page);
                 }
-                Log.Information($"rootbot:出来结果为{token}");
                 return true;
             }
             catch (Exception ex)
@@ -340,8 +306,7 @@ namespace NkFlightWeb.Service
                 if (robotToken.Count > 0)
                 {
                     Log.Information($"rootbot:robotToken【{robotToken.Count}】");
-                    await DoRobot(page, robotToken, min, max);
-                    //await Reload(browser, page);
+                    await NewDoRobot(page, robotToken, min, max);
                 }
 
                 return false;
@@ -352,66 +317,169 @@ namespace NkFlightWeb.Service
             }
         }
 
-        public async Task<bool> DoRunPage(IPage page)
+        public async Task<bool> NewDoRobot(IPage page, List<string> token, int min = 40, int max = 45)
         {
-            List<string> robotToken = new List<string>();
-            string token = "";
-            var exLog = false;
             try
             {
-                page.Response += listenerResonse;
-                async void listenerResonse(object sender, IResponse request)
+                var tip = await page.QuerySelectorAsync("#px-captcha-modal");
+                var dia = await page.QuerySelectorAsync("#px-captcha");
+                var title = await page.TitleAsync();
+                var isRobot = false;
+                if (tip != null || dia != null || title.Contains("Access"))
                 {
-                    try
+                    isRobot = true;
+                    var sleepTime = 0;
+                    Random random = new Random();
+                    var ran = random.Next(min, max); // random.Next(20, 35);// random.Next(40, 43);//random.Next(20, 50);
+                    foreach (var tokenItem in token)
                     {
-                        if (request.Url.Contains("token"))
+                        var needTime = await GetSleepTime(tokenItem);
+                        Log.Information($"rootbot::算出时间{needTime}ms");
+                        if (needTime > 0)
                         {
-                            Log.Information($"{request.Url}");
-                        }
-                        if (request.Url.Contains("/assets/js/bundle"))
-                        {
-                            var body = await request.JsonAsync();
-                            var json = body.ToString();
-                            dynamic obj = JsonConvert.DeserializeObject(json);
-                            var ob = Convert.ToString(obj.ob);
-                            robotToken.Add(ob);
-                            Log.Information($"{request.Url}");
-                        }
-                        if (request.Url.Contains("api/availability/search"))
-                        {
-                            var expire = request.Headers["expires"];
-                            var expireTime = DateTime.Now.AddMinutes(15);
-                            var value = JsonConvert.SerializeObject(request.Request.Headers);
-                            var urls = new List<string> { request.Url };
-                            var cookiesList = await page.Context.CookiesAsync(urls);
-                            string cookies = "";
-
-                            foreach (var cookie in cookiesList)
-                            {
-                                cookies += $"{cookie.Name}={cookie.Value};";
-                            }
-                            token = request.Request.Headers["authorization"];
-                            TokenUserModel tokenModel = new TokenUserModel
-                            {
-                                PassTime = DateTime.Now.AddMinutes(15),
-                                UseTime = DateTime.Now,
-                                Headers = value,
-                                Cookies = cookies,
-                            };
-                            InitConfig.AddTokenList(tokenModel);
-
-                            Log.Information($"{DateTime.Now} tokenCount【 {InitConfig.Get_TokenList().Count}】  获取到token {token}");
+                            sleepTime = needTime + ran;
                         }
                     }
-                    catch (Exception ex)
+                    if (sleepTime == 0)
                     {
-                        Log.Error($"监听失败{ex.Message}");
+                        return false;
                     }
-                };
-                var response = await page.GotoAsync(url, new PageGotoOptions { Timeout = 20000 });
-                await Task.Delay(3000);
-                await DoRobot(page, robotToken);
-                //await page.WaitForSelectorAsync(".toStation", new PageWaitForSelectorOptions { Timeout = 10000 });
+                    var clickX = InitConfig.GetClickX();
+                    var clickY = InitConfig.GetClickY();
+                    if (InitConfig.GetClickX() == 0)
+                    {
+                        var srcPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "cf.jpg");
+                        await page.ScreenshotAsync(new()
+                        {
+                            Path = srcPath,
+                        });
+                        var checkPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "rootbot.png");
+                        Mat temp = Cv2.ImRead(checkPath);
+                        //被匹配图
+                        Mat wafer = Cv2.ImRead(srcPath);
+                        //匹配结果
+                        Mat result = new Mat();
+                        //模板匹配
+                        Cv2.MatchTemplate(wafer, temp, result, TemplateMatchModes.CCoeffNormed);//最好匹配为1,值越小匹配越差
+                                                                                                //数组位置下x,y
+
+                        Point minLoc = new Point(0, 0);
+                        Point maxLoc = new Point(0, 0);
+                        Point matchLoc = new Point(0, 0);
+                        Cv2.MinMaxLoc(result, out minLoc, out maxLoc);
+                        matchLoc = maxLoc;
+                        Mat mask = wafer.Clone();
+                        //画框显示
+                        /*       var clickX = matchLoc.X + 130;
+                               var clickY = matchLoc.Y + 35;*/
+                        clickX = matchLoc.X;
+                        clickY = matchLoc.Y;
+                        //InitConfig.SetClickX(clickX, clickY);
+                    }
+
+                    Log.Information($"rootbot:点击{clickX}【{clickY}】休眠【{sleepTime}】偏移量【{ran}】");
+                    /*Cv2.Rectangle(mask, matchLoc, new Point(clickX, clickY), Scalar.Green, 2);
+                    using (new Window("mask image", mask))
+                    {
+                        Cv2.WaitKey();
+                    }*/
+                    await page.Mouse.MoveAsync(clickX, clickY);
+                    await page.Mouse.DownAsync();
+                    Task.Delay(sleepTime).Wait();
+                    await page.Mouse.UpAsync();
+
+                    //await page.Mouse.ClickAsync(clickX, clickY, new MouseClickOptions { Delay = sleepTime });
+                    /*    var imgPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"dr1{DateTime.Now.ToString("yyyyMMddHHmmss")}.jpg");
+
+                        await page.ScreenshotAsync(new PageScreenshotOptions { Path = imgPath });*/
+
+                    await Task.Delay(5000);
+
+                    /*var imgPath2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"dr2_{DateTime.Now.ToString("yyyyMMddHHmmss")}.jpg");
+
+                    await page.ScreenshotAsync(new PageScreenshotOptions { Path = imgPath2 });*/
+                    await page.GotoAsync(detailurl);
+                    await NewDoClick(page, true);
+                    /*var imgPath3 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"dr3_{DateTime.Now.ToString("yyyyMMddHHmmss")}.jpg");
+
+                    await page.ScreenshotAsync(new PageScreenshotOptions { Path = imgPath3 });*/
+                }
+                return isRobot;
+            }
+            catch (Exception ex)
+            {
+                Log.Information($"处理机器人报错{ex.Message}");
+                return true;
+            }
+        }
+
+        public async Task NewDoClick(IPage page, bool isSec = false)
+        {
+            try
+            {
+                var imgPath2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"pass_{DateTime.Now.ToString("yyyyMMddHHmmss")}.jpg");
+                var title = await page.TitleAsync();
+                if (title.Contains("Access"))
+                {
+                    Log.Information($"rootbot:Access");
+                    return;
+                }
+                await page.ScreenshotAsync(new PageScreenshotOptions { Path = imgPath2 });
+                if (isSec)
+                {
+                    await Task.Delay(3000);
+                }
+                var cookiesBtn = await page.QuerySelectorAsync("#onetrust-accept-btn-handler");
+                if (cookiesBtn != null)
+                {
+                    await cookiesBtn?.ClickAsync();
+                }
+                await Task.Delay(1500);
+                var closeBtn = await page.QuerySelectorAsync(".close");
+                if (closeBtn != null)
+                {
+                    await closeBtn?.ClickAsync();
+                }
+
+                var subBtn = await page.QuerySelectorAsync(".btn-block");
+                await subBtn.ClickAsync(new ElementHandleClickOptions { Timeout = 2000 });
+                await page.WaitForSelectorAsync(".nk-breadcrumbs", new PageWaitForSelectorOptions { Timeout = 7000 });
+            }
+            catch (Exception ex)
+            {
+                if (!isSec)
+                {
+                    throw ex;
+                }
+                else
+                {
+                    Log.Information($"rootbot:人机识别后还是报错了");
+                }
+            }
+        }
+
+        #endregion 打开详情
+
+        /// <summary>
+        /// 正常操作按钮
+        /// </summary>
+        /// <param name="page"></param>
+        /// <returns></returns>
+        public async Task DoClick(IPage page, bool isSec = false)
+        {
+            try
+            {
+                //var imgPath2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"pass_{DateTime.Now.ToString("yyyyMMddHHmmss")}.jpg");
+                var title = await page.TitleAsync();
+                if (title.Contains("Access"))
+                {
+                    return;
+                }
+                //await page.ScreenshotAsync(new PageScreenshotOptions { Path = imgPath2 });
+                if (isSec)
+                {
+                    await Task.Delay(3000);
+                }
                 var cookiesBtn = await page.QuerySelectorAsync("#onetrust-accept-btn-handler");
                 if (cookiesBtn != null)
                 {
@@ -431,46 +499,116 @@ namespace NkFlightWeb.Service
 
                 var subBtn = await page.QuerySelectorAsync(".btn-block");
                 await subBtn.ClickAsync(new ElementHandleClickOptions { Timeout = 2000 });
-
-                await Task.Delay(10000);
-                if (string.IsNullOrWhiteSpace(token) && robotToken.Count > 0)
+                await page.WaitForSelectorAsync(".nk-breadcrumbs", new PageWaitForSelectorOptions { Timeout = 7000 });
+            }
+            catch (Exception ex)
+            {
+                if (!isSec)
                 {
-                    await DoRobot(page, robotToken);
+                    throw ex;
                 }
-                Log.Information($"出来结果为{token}");
+                else
+                {
+                    Log.Information($"rootbot:人机识别后还是报错了");
+                }
+            }
+        }
+
+        public async Task<bool> DoRunPage(IPage page)
+        {
+            List<string> robotToken = new List<string>();
+            string token = "";
+            var exLog = false;
+            var min = 0;
+            var max = 100;
+            try
+            {
+                page.Response += listenerResonse;
+                async void listenerResonse(object sender, IResponse request)
+                {
+                    try
+                    {
+                        if (request.Url.Contains("/assets/js/bundle"))
+                        {
+                            var body = await request.JsonAsync();
+                            var json = body.ToString();
+                            dynamic obj = JsonConvert.DeserializeObject(json);
+                            var ob = Convert.ToString(obj.ob);
+                            robotToken.Add(ob);
+                            Log.Information($"rootbot:{request.Url}");
+                        }
+                        if (request.Url.Contains("api/availability/search"))
+                        {
+                            var expireTime = DateTime.Now.AddMinutes(15);
+                            var value = JsonConvert.SerializeObject(request.Request.Headers);
+                            var urls = new List<string> { request.Url };
+                            var cookiesList = await page.Context.CookiesAsync(urls);
+                            string cookies = "";
+                            var passToken = "";
+                            foreach (var cookie in cookiesList)
+                            {
+                                if (cookie.Name == "tokenData")
+                                {
+                                    passToken = cookie.Value;
+                                }
+                                cookies += $"{cookie.Name}={cookie.Value};";
+                            }
+                            dynamic passTime = JsonConvert.DeserializeObject(passToken);
+                            var time = passTime.lastUsedTimeInMilliseconds.ToString();
+                            var during = passTime.idleTimeoutInMinutes;
+                            var longtime = long.Parse(time);
+                            var intduring = Convert.ToInt32(during);
+                            var useTime = UtilTimeHelper.ConvertToDateTimeByTimeSpane(longtime);
+                            token = request.Request.Headers["authorization"];
+                            TokenUserModel tokenModel = new TokenUserModel
+                            {
+                                PassTime = useTime.AddMinutes(intduring),
+                                UseTime = DateTime.Now,
+                                Headers = value,
+                                Cookies = cookies,
+                                Token = token
+                            };
+                            InitConfig.AddTokenList(tokenModel);
+
+                            Log.Information($"rootbot:{DateTime.Now} tokenCount【 {InitConfig.Get_TokenList().Count}】  获取到token {token}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"rootbot:监听失败{ex.Message}");
+                    }
+                };
+                await page.RouteAsync("**/*", async route =>
+                {
+                    var blockList = new List<string> { "image" }; // 禁止加载的资源类型
+                    if (blockList.Contains(route.Request.ResourceType)) await route.AbortAsync();
+                    else await route.ContinueAsync(); // 其他资源继续加载
+                });
+                var response = await page.GotoAsync(url, new PageGotoOptions { Timeout = 120000 });
+                await Task.Delay(3000);
+                var isRobot = await DoRobot(page, robotToken, min, max);
+                if (!isRobot)
+                {
+                    await DoClick(page);
+                }
                 return true;
             }
             catch (Exception ex)
             {
                 exLog = true;
 
-                Log.Error($"获取token报错{ex.Message}");
+                Log.Error($"rootbot:获取token报错{ex.Message}");
                 if (robotToken.Count > 0)
                 {
-                    Log.Information($"robotToken【{robotToken.Count}】");
-                    await DoRobot(page, robotToken);
+                    Log.Information($"rootbot:robotToken【{robotToken.Count}】");
+                    await DoRobot(page, robotToken, min, max);
                 }
 
                 return false;
             }
             finally
             {
-                //await defaultContext.CloseAsync();
-
                 await page.CloseAsync();
-                /*  if (exLog)
-                  {
-                      await Task.Delay(5000);
-                      try
-                      {
-                          DirectoryInfo di = new DirectoryInfo($"{userDataDir.Replace("\"", "")}\\default");
-                          di.Delete(true);
-                      }
-                      catch (Exception ex2)
-                      {
-                          var ss = ex2;
-                      }
-                  }*/
             }
         }
 
@@ -537,6 +675,7 @@ namespace NkFlightWeb.Service
                         Log.Information($"rootbot::算出时间{needTime}ms");
                         if (needTime > 0)
                         {
+                            ran = needTime / 100;
                             sleepTime = needTime + ran;
                         }
                     }
@@ -544,53 +683,47 @@ namespace NkFlightWeb.Service
                     {
                         return false;
                     }
-                    var srcPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "cf.jpg");
-                    await page.ScreenshotAsync(new()
+                    var clickX = InitConfig.GetClickX();
+                    var clickY = InitConfig.GetClickY();
+                    if (InitConfig.GetClickX() == 0)
                     {
-                        Path = srcPath,
-                    });
-                    var checkPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "rootbot.png");
-                    Mat temp = Cv2.ImRead(checkPath);
-                    //被匹配图
-                    Mat wafer = Cv2.ImRead(srcPath);
-                    //匹配结果
-                    Mat result = new Mat();
-                    //模板匹配
-                    Cv2.MatchTemplate(wafer, temp, result, TemplateMatchModes.CCoeffNormed);//最好匹配为1,值越小匹配越差
-                                                                                            //数组位置下x,y
+                        var srcPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "cf.jpg");
+                        await page.ScreenshotAsync(new()
+                        {
+                            Path = srcPath,
+                        });
+                        var checkPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "rootbot.png");
+                        Mat temp = Cv2.ImRead(checkPath);
+                        //被匹配图
+                        Mat wafer = Cv2.ImRead(srcPath);
+                        //匹配结果
+                        Mat result = new Mat();
+                        //模板匹配
+                        Cv2.MatchTemplate(wafer, temp, result, TemplateMatchModes.CCoeffNormed);//最好匹配为1,值越小匹配越差
+                                                                                                //数组位置下x,y
 
-                    Point minLoc = new Point(0, 0);
-                    Point maxLoc = new Point(0, 0);
-                    Point matchLoc = new Point(0, 0);
-                    Cv2.MinMaxLoc(result, out minLoc, out maxLoc);
-                    matchLoc = maxLoc;
-                    Mat mask = wafer.Clone();
-                    //画框显示
-                    /*       var clickX = matchLoc.X + 130;
-                           var clickY = matchLoc.Y + 35;*/
-                    var clickX = matchLoc.X;
-                    var clickY = matchLoc.Y;
-                    Log.Information($"rootbot::点击{clickX}【{clickY}】休眠【{sleepTime}】偏移量【{ran}】");
-                    /*Cv2.Rectangle(mask, matchLoc, new Point(clickX, clickY), Scalar.Green, 2);
-                    using (new Window("mask image", mask))
-                    {
-                        Cv2.WaitKey();
-                    }*/
-                    /*   await page.Mouse.MoveAsync(clickX, clickY);
-                       await page.Mouse.DownAsync();
-                       Task.Delay(sleepTime).Wait();
-                       await page.Mouse.UpAsync();*/
+                        Point minLoc = new Point(0, 0);
+                        Point maxLoc = new Point(0, 0);
+                        Point matchLoc = new Point(0, 0);
+                        Cv2.MinMaxLoc(result, out minLoc, out maxLoc);
+                        matchLoc = maxLoc;
+                        Mat mask = wafer.Clone();
+                        //画框显示
+                        /*       var clickX = matchLoc.X + 130;
+                               var clickY = matchLoc.Y + 35;*/
+                        clickX = matchLoc.X;
+                        clickY = matchLoc.Y;
+                        //InitConfig.SetClickX(clickX, clickY);
+                    }
+                    Log.Information($"rootbot:点击{clickX}【{clickY}】休眠【{sleepTime}】偏移量【{ran}】");
+                    await page.Mouse.MoveAsync(clickX, clickY);
+                    await page.Mouse.DownAsync();
+                    Task.Delay(sleepTime).Wait();
+                    await page.Mouse.UpAsync();
+                    var imgPath3 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"dr3_{DateTime.Now.ToString("yyyyMMddHHmmss")}.jpg");
 
-                    await page.Mouse.ClickAsync(clickX, clickY, new MouseClickOptions { Delay = sleepTime });
-                    /*    var imgPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"dr1{DateTime.Now.ToString("yyyyMMddHHmmss")}.jpg");
-
-                        await page.ScreenshotAsync(new PageScreenshotOptions { Path = imgPath });*/
-
+                    await page.ScreenshotAsync(new PageScreenshotOptions { Path = imgPath3 });
                     await Task.Delay(5000);
-
-                    /*var imgPath2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"dr2_{DateTime.Now.ToString("yyyyMMddHHmmss")}.jpg");
-
-                    await page.ScreenshotAsync(new PageScreenshotOptions { Path = imgPath2 });*/
                     await page.GotoAsync(url);
                     /*var imgPath3 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"dr3_{DateTime.Now.ToString("yyyyMMddHHmmss")}.jpg");
 
@@ -727,6 +860,7 @@ namespace NkFlightWeb.Service
             Stopwatch stopwatch = Stopwatch.StartNew();
             foreach (var tocity in AllTo)
             {
+                var index = AllTo.IndexOf(tocity);
                 try
                 {
                     stopwatch.Restart();
@@ -792,14 +926,14 @@ namespace NkFlightWeb.Service
                         await journeyRe.InsertAsync(lionAirlJourney);
                         await segmentRe.BatchInsertAsync(segments);
                         await transaction.CommitAsync();
-                        stopwatch.Stop();
-                        Log.Information($"{tocity.fromcity}_{tocity.city}_{date}抓取到数据{resList.Count}条报价数据耗时{stopwatch.ElapsedMilliseconds}ms");
-                        await Task.Delay(2000);
                     }
+                    stopwatch.Stop();
+                    Log.Information($"Api:【{index}】{tocity.fromcity}_{tocity.city}_{date}抓取到数据{resList.Count}条报价数据耗时{stopwatch.ElapsedMilliseconds}ms");
+                    await Task.Delay(2000);
                 }
                 catch (Exception ex)
                 {
-                    Log.Error($"已执行{AllTo.IndexOf(tocity)}条数据");
+                    Log.Error($"Api:已执行{index}条数据");
                     Log.Error($"{tocity.fromcity}_{tocity.city}_{date}获取失败 {ex.Message}");
                 }
             }
@@ -1031,7 +1165,7 @@ namespace NkFlightWeb.Service
                                     CodeShare = segment.identifier.carrierCode == "NK" ? false : true,
                                     ShareCarrier = segment.identifier.carrierCode == "NK" ? "" : segment.identifier.carrierCode,
                                     ShareFlightNumber = segment.identifier.carrierCode == "NK" ? "" : segment.identifier.identifier,
-                                    AircraftCode = eq
+                                    AircraftCode = await GetAircraftCodeByEq(eq)
                                 };
                                 segList.Add(seg);
                                 rateCode += $"_{seg.Carrier}{seg.FlightNumber}_{Convert.ToDateTime(seg.DepDate).ToString("yyyyMMddHHmm")}";
@@ -1053,35 +1187,102 @@ namespace NkFlightWeb.Service
             }
 
             stopwatch.Stop();
-            Log.Information($"获取{priceList.Count}条数据耗时{stopwatch.ElapsedMilliseconds}ms");
+            Log.Information($"Api:获取{priceList.Count}条数据耗时{stopwatch.ElapsedMilliseconds}ms");
             return priceList;
+        }
+
+        public async Task<string> GetAircraftCodeByEq(string eq)
+        {
+            switch (eq)
+            {
+                case "32A":
+                case "32N":
+                    return "A320";
+
+                case "32B":
+                case "32Q":
+                    return "A321";
+
+                case "319":
+                    return "A319";
+            }
+            return "A320";
         }
 
         public async Task<dynamic> BuildApiRequest(string json)
         {
             var tokenList = InitConfig.Get_TokenList();
-            var dbToken = InitConfig.Get_Token();
-            while (dbToken != null)
+            tokenList = tokenList.OrderBy(n => n.UseTime).ToList();
+            foreach (var dbToken in tokenList)
             {
                 try
                 {
-                    dbToken = InitConfig.Get_Token();
                     var header = JsonConvert.DeserializeObject<Dictionary<string, string>>(dbToken.Headers);
-                    header.Add("origin", "https://www.spirit.com");
-                    var res = HttpHelper.HttpOriginPost(apiUrl, json, header, dbToken.Cookies);
+                    var res = HttpOriginPost(apiUrl, json, header, dbToken.Cookies);
                     dynamic data = JsonConvert.DeserializeObject(res);
-                    Log.Information($"Api:{dbToken.PassTime}");
+                    Log.Information($"Api:【{dbToken.PassTime}】");
                     dbToken.UseTime = DateTime.Now;
                     return data;
                 }
                 catch (Exception ex)
                 {
-                    tokenList.Remove(dbToken);
-                    dbToken = InitConfig.Get_Token();
-                    Log.Error($"Api:请求发生错误，移除token{dbToken.Token}{ex.Message}");
+                    Log.Error($"Api:请求发生错误，使用{dbToken.PassTime}出错{ex.Message}");
                 }
             }
             return null;
+        }
+
+        public string HttpOriginPost(string url, string data, Dictionary<string, string> headers, string cookies = "")
+        {
+            //创建http请求
+            HttpWebRequest httpWebRequest = (HttpWebRequest)HttpWebRequest.Create(url);
+            //字符串转换为字节码
+            byte[] bs = Encoding.UTF8.GetBytes(data);
+            //参数类型，这里是json类型
+            //还有别的类型如"application/x-www-form-urlencoded"
+            httpWebRequest.ContentType = "application/json;";
+            //参数数据长度
+            httpWebRequest.ContentLength = bs.Length;
+            httpWebRequest.KeepAlive = false;
+            httpWebRequest.UseDefaultCredentials = true;
+            httpWebRequest.ServicePoint.Expect100Continue = false;//important
+            //设置请求类型
+            httpWebRequest.Method = "POST";
+            if (headers != null)
+            {
+                foreach (var header in headers)
+                {
+                    httpWebRequest.Headers.Add(header.Key, header.Value);
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(cookies))
+            {
+                httpWebRequest.Headers.Add("Cookie", cookies);
+            }
+            //设置超时时间
+            httpWebRequest.Timeout = 20000;
+            //将参数写入请求地址中
+            httpWebRequest.GetRequestStream().Write(bs, 0, bs.Length);
+            //发送请求
+            HttpWebResponse httpWebResponse = (HttpWebResponse)httpWebRequest.GetResponse();
+            /*   foreach (var item in httpWebResponse.Headers)
+               {
+                   if (item.Key == "Set-Cookie")
+                   {
+                       var coo = item.Value;
+                       foreach (var key in coo)
+                       {
+                           Log.Information($"{key}");
+                       }
+                   }
+               }*/
+            //读取返回数据
+            StreamReader streamReader = new StreamReader(httpWebResponse.GetResponseStream(), Encoding.UTF8);
+            string responseContent = streamReader.ReadToEnd();
+            streamReader.Close();
+            httpWebResponse.Close();
+            httpWebRequest.Abort();
+            return responseContent;
         }
 
         /// <summary>

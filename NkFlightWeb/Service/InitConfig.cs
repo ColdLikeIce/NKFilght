@@ -1,5 +1,6 @@
 ﻿using LionAir.Core.TimeSecurity;
 using NkFlightWeb.Service.Dto;
+using Serilog;
 
 namespace NkFlightWeb.Service
 {
@@ -8,6 +9,35 @@ namespace NkFlightWeb.Service
         private static readonly object _locker = new Object();
         private static InitConfig _instance = null;
         private static List<TokenUserModel> tokenList = new List<TokenUserModel>();
+        private static int ClickX = 0;
+        private static int ClickY = 0;
+        private static bool isFirst = true;
+
+        public static void setFirst()
+        {
+            isFirst = false;
+        }
+
+        public static bool GetFirst()
+        {
+            return isFirst;
+        }
+
+        public static int GetClickX()
+        {
+            return ClickX;
+        }
+
+        public static void SetClickX(int clickX, int clickY)
+        {
+            ClickX = clickX;
+            ClickY = clickY;
+        }
+
+        public static int GetClickY()
+        {
+            return ClickX;
+        }
 
         /// <summary>
         /// 单例
@@ -32,6 +62,8 @@ namespace NkFlightWeb.Service
 
         public static void AddTokenList(TokenUserModel token)
         {
+            Log.Information($"rootbot:替换token【{token.PassTime}】【{tokenList.FirstOrDefault()?.PassTime}】");
+            tokenList = new List<TokenUserModel>();
             tokenList.Add(token);
         }
 
