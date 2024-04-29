@@ -539,7 +539,6 @@ namespace NkFlightWeb.Service
                         }
                         if (request.Url.Contains("api/availability/search"))
                         {
-                            var expireTime = DateTime.Now.AddMinutes(15);
                             var value = JsonConvert.SerializeObject(request.Request.Headers);
                             var urls = new List<string> { request.Url };
                             var cookiesList = await page.Context.CookiesAsync(urls);
@@ -554,10 +553,8 @@ namespace NkFlightWeb.Service
                                 cookies += $"{cookie.Name}={cookie.Value};";
                             }
                             dynamic passTime = JsonConvert.DeserializeObject(passToken);
-                            var time = passTime.lastUsedTimeInMilliseconds.ToString();
-                            var during = passTime.idleTimeoutInMinutes;
-                            var longtime = long.Parse(time);
-                            var intduring = Convert.ToInt32(during);
+                            var longtime = long.Parse(passTime.lastUsedTimeInMilliseconds.ToString());
+                            var intduring = Convert.ToInt32(passTime.idleTimeoutInMinutes);
                             var useTime = UtilTimeHelper.ConvertToDateTimeByTimeSpane(longtime);
                             token = request.Request.Headers["authorization"];
                             TokenUserModel tokenModel = new TokenUserModel
@@ -713,16 +710,16 @@ namespace NkFlightWeb.Service
                                var clickY = matchLoc.Y + 35;*/
                         clickX = matchLoc.X;
                         clickY = matchLoc.Y;
-                        //InitConfig.SetClickX(clickX, clickY);
+                        InitConfig.SetClickX(clickX, clickY);
                     }
                     Log.Information($"rootbot:点击{clickX}【{clickY}】休眠【{sleepTime}】偏移量【{ran}】");
                     await page.Mouse.MoveAsync(clickX, clickY);
                     await page.Mouse.DownAsync();
                     Task.Delay(sleepTime).Wait();
                     await page.Mouse.UpAsync();
-                    var imgPath3 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"dr3_{DateTime.Now.ToString("yyyyMMddHHmmss")}.jpg");
+                    /*    var imgPath3 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"dr3_{DateTime.Now.ToString("yyyyMMddHHmmss")}.jpg");
 
-                    await page.ScreenshotAsync(new PageScreenshotOptions { Path = imgPath3 });
+                        await page.ScreenshotAsync(new PageScreenshotOptions { Path = imgPath3 });*/
                     await Task.Delay(5000);
                     await page.GotoAsync(url);
                     /*var imgPath3 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"dr3_{DateTime.Now.ToString("yyyyMMddHHmmss")}.jpg");
@@ -1218,7 +1215,8 @@ namespace NkFlightWeb.Service
                 try
                 {
                     var header = JsonConvert.DeserializeObject<Dictionary<string, string>>(dbToken.Headers);
-                    var res = HttpOriginPost(apiUrl, json, header, dbToken.Cookies);
+                    header.Add("Accept-Encoding", "utf-8");
+                    var res = HttpOriginPost(apiUrl, json, header);
                     dynamic data = JsonConvert.DeserializeObject(res);
                     Log.Information($"Api:【{dbToken.PassTime}】");
                     dbToken.UseTime = DateTime.Now;

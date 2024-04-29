@@ -36,7 +36,7 @@ namespace NkFlightWeb.Service
 
         public static int GetClickY()
         {
-            return ClickX;
+            return ClickY;
         }
 
         /// <summary>
