@@ -1210,7 +1210,7 @@ namespace NkFlightWeb.Service
             }
             catch (Exception ex)
             {
-                Log.Error($"请求发生错误，{ex.Message}");
+                Log.Error($"Api:请求发生错误，{ex.Message}");
             }
 
             stopwatch.Stop();
@@ -1259,7 +1259,7 @@ namespace NkFlightWeb.Service
                     {
                         var token = await BuildToken();
                         Log.Error($"Api:403主动获取token{token}");
-                        await BuildApiRequest(json, i++);
+                        return await BuildApiRequest(json, i++);
                     }
                 }
             }
