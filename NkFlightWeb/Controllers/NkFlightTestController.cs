@@ -20,7 +20,7 @@ namespace NkFlightWeb.Controllers
         /// </summary>
         /// <param name="activeModel"></param>
         /// <returns></returns>
-        [HttpPost("BuildCity")]
+        [HttpGet("BuildCity")]
         public async Task BuildCity()
         {
             await _domain.BuildCity();
