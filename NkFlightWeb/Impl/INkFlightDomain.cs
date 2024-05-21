@@ -25,7 +25,7 @@ namespace NkFlightWeb.Impl
         /// 构建城市
         /// </summary>
         /// <returns></returns>
-        Task BuildCity();
+        Task<string> BuildCity();
 
         Task<bool> PushAllFlightToDb(SearchDayDto dto);
     }

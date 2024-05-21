@@ -16,14 +16,14 @@ namespace NkFlightWeb.Controllers
         }
 
         /// <summary>
-        ///  报价接口
+        ///  爬取城市接口
         /// </summary>
         /// <param name="activeModel"></param>
         /// <returns></returns>
         [HttpGet("BuildCity")]
-        public async Task BuildCity()
+        public async Task<string> BuildCity()
         {
-            await _domain.BuildCity();
+            return await _domain.BuildCity();
         }
 
         /// <summary>

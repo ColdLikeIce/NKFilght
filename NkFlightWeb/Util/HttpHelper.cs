@@ -186,9 +186,12 @@ namespace NkFlightWeb.Util
             request.ContentType = "application/json;charet=utf-8";
             request.Headers.Add("dataType", "json");
             request.Headers.Add("type", "post");
-            foreach (var header in headers)
+            if (headers != null)
             {
-                request.Headers.Add(header.Key, header.Value);
+                foreach (var header in headers)
+                {
+                    request.Headers.Add(header.Key, header.Value);
+                }
             }
             byte[] data = encoding.GetBytes(param);
 

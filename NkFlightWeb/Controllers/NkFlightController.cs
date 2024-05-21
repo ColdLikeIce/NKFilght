@@ -1,10 +1,12 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using LionAir.Core.TimeSecurity;
+using Microsoft.AspNetCore.Mvc;
 using NkFlightWeb.Impl;
 using Qunar.Airtickets.Supplier.Concat.Dtos.Input;
 using Qunar.Airtickets.Supplier.Concat.Dtos.Output;
 
 namespace NkFlightWeb.Controllers
 {
+    [ApiTimeSecurity]
     public class NkFlightController : BaseController
     {
         private readonly INkFlightDomain _domain;

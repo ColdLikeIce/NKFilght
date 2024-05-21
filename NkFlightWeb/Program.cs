@@ -7,6 +7,8 @@ using IGeekFan.AspNetCore.Knife4jUI;
 using CommonCore.Dependency;
 using NkFlightWeb.Db;
 using NkFlightWeb.Workers;
+using Newtonsoft.Json;
+using NkFlightWeb.Config;
 
 var configuration = new ConfigurationBuilder()
 .SetBasePath(Directory.GetCurrentDirectory())
@@ -18,10 +20,17 @@ var logger = new LoggerConfiguration()
    .CreateLogger();
 Log.Logger = logger;
 var builder = WebApplication.CreateBuilder(args);
-Log.Information("Starting LionAirl WebApi");
+Log.Information("Starting NKFlight WebApi");
+builder.Services.AddControllers()
+              .AddNewtonsoftJson(op =>
+              {
+                  op.SerializerSettings.ContractResolver = new Newtonsoft.Json.Serialization.CamelCasePropertyNamesContractResolver();
+                  op.SerializerSettings.DateFormatString = "yyyy-MM-dd HH:mm:ss";
+                  op.SerializerSettings.NullValueHandling = NullValueHandling.Ignore;
+              });
 // Add services to the container.
 builder.Services.AddControllers()
-    .AddApiResult();
+    .AddApiResult().AddApiSignature();
 builder.Services.AddHostedService<GetTokenWorker>();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
@@ -38,6 +47,7 @@ builder.Services.AddHyTripEntityFramework<HeyTripDbContext>(options =>
 {
     options.UseMySql(builder.Configuration.GetConnectionString("heytripDb"), ServerVersion.AutoDetect(builder.Configuration.GetConnectionString("heytripDb")));
 });
+builder.Services.Configure<AppSetting>(builder.Configuration.GetSection("AppSetting"));
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -50,8 +60,8 @@ if (app.Environment.IsDevelopment())
 else
 {
     app.UseSwagger();
-    //app.UseSwaggerUI();
-    app.UseKnife4UI();
+    app.UseSwaggerUI();
+    //app.UseKnife4UI();
 }
 
 app.UseHttpsRedirection();

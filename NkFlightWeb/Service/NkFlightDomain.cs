@@ -1,4 +1,7 @@
 ﻿using CommonCore.EntityFramework.Common;
+using CommonCore.Mapper;
+using CommonCore.Security;
+using CommonCore.Util;
 using DtaAccess.Domain.Enums;
 using DtaAccess.Domain.Models;
 using Microsoft.AspNetCore.Mvc.RazorPages;
@@ -7,6 +10,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Playwright;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using NkFlightWeb.Config;
 using NkFlightWeb.Db;
 using NkFlightWeb.Entity;
 using NkFlightWeb.Impl;
@@ -27,6 +31,7 @@ using System.Drawing;
 using System.IO;
 using System.Net;
 using System.Reflection.PortableExecutable;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -37,16 +42,20 @@ namespace NkFlightWeb.Service
     public class NkFlightDomain : INkFlightDomain
     {
         private readonly IBaseRepository<HeyTripDbContext> _repository;
-        private readonly string nktoken = "Nktoken";
-        private readonly int tokenCount = 3;
         private readonly string apiUrl = "https://www.spirit.com/api/prod-availability/api/availability/search";
 
         private readonly string detailurl = $"https://www.spirit.com/book/flights?tripType=oneWay&bookingType=flight&from=SJC&departDate={DateTime.Now.AddDays(3).ToString("yyyy-MM-dd")}&to=BQN&returnDate=&adt=1&chd=0&inf=0";
         private readonly string url = $"https://www.spirit.com";
+        private readonly IConfiguration _configuration;
+        private readonly AppSetting _setting;
+        private readonly IMapper _mapper;
 
-        public NkFlightDomain(IBaseRepository<HeyTripDbContext> repository)
+        public NkFlightDomain(IConfiguration configuration, IOptions<AppSetting> options, IBaseRepository<HeyTripDbContext> repository, IMapper mapper)
         {
+            _setting = options.Value;
+            _configuration = configuration;
             _repository = repository;
+            _mapper = mapper;
         }
 
         private async Task<bool> JustToken()
@@ -61,128 +70,41 @@ namespace NkFlightWeb.Service
         }
 
         /// <summary>
-        /// 获取token
-        /// </summary>
-        /// <returns></returns>
-        public async Task<bool> GetToken1()
-        {
-            if (!await JustToken())
-            {
-                var port = "5656";
-
-                using var playwright = await Playwright.CreateAsync();
-                await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = false });
-
-                var userDataDir = "D:\\work\\NK";
-
-                try
-                {
-                    await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new BrowserTypeConnectOverCDPOptions { SlowMo = 10 });
-                }
-                catch (Exception ex)
-                {
-                    try
-                    {
-                        //新的命令行
-                        var str = $"cd/d   C:\\Program Files\\Google\\Chrome\\Application\\ && chrome.exe --remote-debugging-port={port} --user-data-dir={userDataDir}  --start-maximized --new-window https://www.baidu.com";
-                        System.Diagnostics.Process p = new System.Diagnostics.Process();
-                        p.StartInfo.FileName = "cmd.exe";
-                        p.StartInfo.UseShellExecute = false;    //是否使用操作系统shell启动
-                        p.StartInfo.RedirectStandardInput = true;//接受来自调用程序的输入信息
-                        p.StartInfo.RedirectStandardOutput = true;//由调用程序获取输出信息
-                        p.StartInfo.RedirectStandardError = true;//重定向标准错误输出
-                        p.StartInfo.CreateNoWindow = true;//不显示程序窗口
-                        p.Start();//启动程序
-                        p.StandardInput.WriteLine(str + "&exit");
-                        p.StandardInput.AutoFlush = true;
-                        p.WaitForExit();//等待程序执行完退出进程
-                        p.Close();
-                        // --incognito
-                    }
-                    catch (Exception ex1)
-                    {
-                        Console.WriteLine("Error opening the browser: " + ex1.Message);
-                    }
-                }
-                await using var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new BrowserTypeConnectOverCDPOptions { SlowMo = 10 });
-                var defaultContext = browser.Contexts[0];
-                var page = defaultContext.Pages[0];
-                return await DoRunPage(page);
-            }
-            return true;
-        }
-
-        /// <summary>
         /// 无头浏览器
         /// </summary>
         /// <returns></returns>
-        public async Task<bool> GetToken_cms()
+        public async Task<bool> BuildToken_cmd()
         {
-            var tokenList = InitConfig.Get_TokenList();
             //解决5分钟超时 则去重新获取
             var userDataDir = "D:\\work\\NF";
-            if (!await JustToken())
-            {
-                Log.Information($"尝试获取token过期时间为{tokenList.FirstOrDefault()?.PassTime}");
-                var port = "9898";
+            var port = "9898";
 
-                using var playwright = await Playwright.CreateAsync();
+            using var playwright = await Playwright.CreateAsync();
+            try
+            {
+                await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new BrowserTypeConnectOverCDPOptions { SlowMo = 10 });
+            }
+            catch (Exception ex)
+            {
                 try
                 {
-                    await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new BrowserTypeConnectOverCDPOptions { SlowMo = 10 });
+                    var browserPath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+                    ProcessStartInfo psi = new ProcessStartInfo(browserPath);
+                    psi.Arguments = $" --remote-debugging-port={port} --user-data-dir=\"{userDataDir}\"  --start-maximized  --incognito --new-window https://www.spirit.com";
+                    //psi.Arguments = $" --remote-debugging-port={port}  --start-maximized  --incognito --new-window https://www.taobao.com";
+
+                    Process.Start(psi);
+                    await Task.Delay(2000);
                 }
-                catch (Exception ex)
+                catch (Exception ex1)
                 {
-                    try
-                    {
-                        var browserPath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
-                        ProcessStartInfo psi = new ProcessStartInfo(browserPath);
-                        psi.Arguments = $" --remote-debugging-port={port} --user-data-dir=\"{userDataDir}\"  --start-maximized  --incognito --new-window https://www.taobao.com";
-                        //psi.Arguments = $" --remote-debugging-port={port}  --start-maximized  --incognito --new-window https://www.taobao.com";
-
-                        Process.Start(psi);
-                        await Task.Delay(2000);
-                    }
-                    catch (Exception ex1)
-                    {
-                        Console.WriteLine("Error opening the browser: " + ex1.Message);
-                    }
+                    Console.WriteLine("Error opening the browser: " + ex1.Message);
                 }
-                await using var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new BrowserTypeConnectOverCDPOptions { SlowMo = 10 });
-                var defaultContext = browser.Contexts[0];
-                var page = defaultContext.Pages[0];
-                return await DoRunPage(page);
             }
-            return true;
-        }
-
-        /// <summary>
-        /// 打开 浏览器 指定路径 和 缓存
-        /// </summary>
-        /// <returns></returns>
-        public async Task<bool> GetToken2()
-        {
-            var userDataDir = "D:\\work\\NF";
-
-            if (!await JustToken())
-            {
-                using var playwright = await Playwright.CreateAsync();
-
-                var args = new List<string>() { "--start-maximized", "--disable-blink-features=AutomationControlled" };
-                if (!InitConfig.GetFirst())
-                {
-                    args.Add("--incognito");
-                    InitConfig.setFirst();
-                }
-                var chromiunPath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
-                await using var browser = await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, new BrowserTypeLaunchPersistentContextOptions
-                { Headless = false, Args = args.ToArray(), ViewportSize = ViewportSize.NoViewport, BypassCSP = true, SlowMo = 10, ExecutablePath = chromiunPath });
-
-                var page = browser.Pages[0];
-                return await DoRunPage(page);
-            }
-
-            return true;
+            await using var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://localhost:{port}", new BrowserTypeConnectOverCDPOptions { SlowMo = 10 });
+            var defaultContext = browser.Contexts[0];
+            var page = defaultContext.Pages[0];
+            return await DoRunPage(page);
         }
 
         /// <summary>
@@ -199,11 +121,79 @@ namespace NkFlightWeb.Service
             return true;
         }
 
+        public async Task<bool> BuildToken()
+        {
+            var json = "";
+            // 指定可执行文件的路径
+            var pythonScriptPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "NK_Flight_Pass.exe");
+            var checkPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "rootbot.png");
+            // 构造命令行参数字符串
+            string arguments = $"--path {checkPath}";
+
+            ProcessStartInfo startInfo = new ProcessStartInfo();
+            startInfo.FileName = pythonScriptPath; // 可执行文件的路径
+            startInfo.Arguments = arguments; // 传递给可执行文件的参数
+            startInfo.UseShellExecute = false;
+            startInfo.RedirectStandardOutput = true;
+            startInfo.CreateNoWindow = true;
+            startInfo.RedirectStandardError = true;
+            using Process process = new Process { StartInfo = startInfo };
+            try
+            {
+                process.Start();
+
+                // 异步读取输出
+                StringBuilder output = new StringBuilder();
+                process.OutputDataReceived += (sender, args) =>
+                {
+                    if (args.Data != null)
+                    {
+                        output.AppendLine(args.Data);
+                    }
+                };
+
+                process.BeginOutputReadLine();
+                process.WaitForExit(1000 * 180); //3分钟
+                // 读取并显示Python脚本的输出
+                json = output.ToString();
+                Log.Information($"脚本返回{json}");
+                json = HtmlHelper.MidMatchString(json, "jsonstart", "jsonEnd");
+                if (!string.IsNullOrWhiteSpace(json))
+                {
+                    dynamic qq = JsonConvert.DeserializeObject(json);
+                    dynamic header = JsonConvert.DeserializeObject(qq.header.ToString());
+                    dynamic passTime = JsonConvert.DeserializeObject(qq.token.ToString());
+                    var longtime = long.Parse(passTime.lastUsedTimeInMilliseconds.ToString());
+                    var intduring = Convert.ToInt32(passTime.idleTimeoutInMinutes);
+                    var useTime = UtilTimeHelper.ConvertToDateTimeByTimeSpane(longtime);
+                    TokenUserModel tokenModel = new TokenUserModel
+                    {
+                        PassTime = useTime.AddMinutes(intduring),
+                        UseTime = useTime,
+                        Headers = qq.header.ToString(),
+                        Cookies = qq.cookies.ToString(),
+                        Token = passTime.token.ToString()
+                    };
+                    InitConfig.AddTokenList(tokenModel);
+                    Log.Information($"获取token成功");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"An error occurred: {ex.Message}");
+            }
+            finally
+            {
+                process.Kill();
+            }
+            return true;
+        }
+
         /// <summary>
         /// 构建token
         /// </summary>
         /// <returns></returns>
-        public async Task<bool> BuildToken()
+        public async Task<bool> BuildTokencmd()
         {
             using var playwright = await Playwright.CreateAsync();
 
@@ -230,13 +220,11 @@ namespace NkFlightWeb.Service
         {
             try
             {
-                //var imgPath2 = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, $"pass_{DateTime.Now.ToString("yyyyMMddHHmmss")}.jpg");
                 var title = await page.TitleAsync();
                 if (title.Contains("Access"))
                 {
                     return;
                 }
-                //await page.ScreenshotAsync(new PageScreenshotOptions { Path = imgPath2 });
                 if (isSec)
                 {
                     await Task.Delay(3000);
@@ -349,6 +337,16 @@ namespace NkFlightWeb.Service
                 {
                     await DoClick(page);
                 }
+                var during = 0;
+                while (string.IsNullOrWhiteSpace(token))
+                {
+                    await Task.Delay(100);
+                    if (during > 1000 * 10)
+                    {
+                        break;
+                    }
+                    during += 100;
+                }
                 return true;
             }
             catch (Exception ex)
@@ -385,7 +383,13 @@ namespace NkFlightWeb.Service
             var contain = secList.Where(n => n.Contains("1oo11o")).FirstOrDefault();
             if (contain == null)
             {
-                return 0;
+                secStr = await GetPt(base64Decoded, 0);
+                secList = secStr.Split("|").ToList();
+                contain = secList.Where(n => n.Contains("1oo11o")).FirstOrDefault();
+                if (contain == null)
+                {
+                    return 0;
+                }
             }
             var iddex = secList.IndexOf(contain);
             var fith = secList[iddex + 4].Split("_").LastOrDefault();
@@ -426,7 +430,7 @@ namespace NkFlightWeb.Service
                     isRobot = true;
                     var sleepTime = 0;
                     Random random = new Random();
-                    var ran = random.Next(min, max); // random.Next(20, 35);// random.Next(40, 43);//random.Next(20, 50);
+                    var ran = random.Next(min, max);
                     foreach (var tokenItem in token)
                     {
                         var needTime = await GetSleepTime(tokenItem);
@@ -434,6 +438,10 @@ namespace NkFlightWeb.Service
                         if (needTime > 0)
                         {
                             ran = needTime / 100;
+                            /*  if (needTime % 1000 > 0)
+                              {
+                                  needTime = (needTime / 1000 + 1) * 1000;
+                              }*/
                             sleepTime = needTime + ran;
                         }
                     }
@@ -491,7 +499,8 @@ namespace NkFlightWeb.Service
             }
         }
 
-        #region  构建城市
+        #region 构建城市
+
         /// <summary>
         /// 人机识别（构建城市）
         /// </summary>
@@ -683,9 +692,23 @@ namespace NkFlightWeb.Service
             }
         }
 
-        public async Task BuildCity()
+        /// <summary>
+        /// 获取配置编码
+        /// </summary>
+        /// <returns></returns>
+        private async Task<ClientKey> GetClientKey()
+        {
+            var clientKeys = _configuration.GetSection("ClientKey").Get<List<ClientKey>>();
+            return clientKeys.FirstOrDefault();
+        }
+
+        public async Task<string> BuildCity()
         {
             var citys = await _repository.GetRepository<NkToAirlCity>().Query().ToListAsync();
+            var timeSpan = GetTimeStamp();
+            var clientKeys = _configuration.GetSection("ClientKey").Get<List<ClientKey>>();
+            var clients = clientKeys.FirstOrDefault();
+            var md5 = GetMD5WithString($"{clients.AppId}{clients.AccessKey}{timeSpan}");
             if (citys.Count == 0)
             {
                 using var playwright = await Playwright.CreateAsync();
@@ -753,9 +776,36 @@ namespace NkFlightWeb.Service
                     await page.CloseAsync();
                 }
             }
+            return md5 + "_" + timeSpan;
         }
 
-        #endregion
+        /// <summary>
+        /// 获取时间戳
+        /// </summary>
+        /// <returns></returns>
+        public static string GetTimeStamp()
+        {
+            TimeSpan ts = DateTime.UtcNow - new DateTime(1970, 1, 1, 0, 0, 0, 0);
+            return Convert.ToInt64(ts.TotalMilliseconds).ToString();
+        }
+
+        private string GetMD5WithString(String input)
+        {
+            MD5 md5Hash = MD5.Create();
+            // 将输入字符串转换为字节数组并计算哈希数据
+            byte[] data = md5Hash.ComputeHash(Encoding.UTF8.GetBytes(input));
+            // 创建一个 Stringbuilder 来收集字节并创建字符串
+            StringBuilder str = new StringBuilder();
+            // 循环遍历哈希数据的每一个字节并格式化为十六进制字符串
+            for (int i = 0; i < data.Length; i++)
+            {
+                str.Append(data[i].ToString("x2")); //加密结果"x2"结果为32位,"x3"结果为48位,"x4"结果为64位
+            }
+            // 返回十六进制字符串
+            return str.ToString();
+        }
+
+        #endregion 构建城市
 
         public async Task<bool> PushAllFlightToDb(SearchDayDto dto)
         {
@@ -835,7 +885,7 @@ namespace NkFlightWeb.Service
                     }
                     stopwatch.Stop();
                     Log.Information($"Api:【{index}】抓取到数据{resList.Count}条报价数据耗时{stopwatch.ElapsedMilliseconds}ms");
-                    await Task.Delay(2000);
+                    await Task.Delay(5000);
                 }
                 catch (Exception ex)
                 {
@@ -889,27 +939,112 @@ namespace NkFlightWeb.Service
         /// <returns></returns>
         public async Task<SearchAirtickets_Data> SearchAirtickets(SearchAirticketsInput dto)
         {
+            Log.Information($"接口接收到了{JsonConvert.SerializeObject(dto)}");
             SearchAirtickets_Data searchAirtickets_Data = new SearchAirtickets_Data() { Success = true };
+
+            List<SegmentLineDetail> fromList = new List<SegmentLineDetail>();
+            foreach (var seg in dto.Data.FromSegments)
+            {
+                fromList.Add(new SegmentLineDetail
+                {
+                    ArrAirport = seg.ArrCityCode,
+                    DepAirport = seg.DepCityCode,
+                    DepDate = seg.DepDate
+                });
+            }
+            List<SegmentLineDetail> toList = new List<SegmentLineDetail>();
+            foreach (var seg in dto.Data.RetSegments)
+            {
+                toList.Add(new SegmentLineDetail
+                {
+                    ArrAirport = seg.ArrCityCode,
+                    DepAirport = seg.DepCityCode,
+                    DepDate = seg.DepDate
+                });
+            }
+            StepDto stepDto = new StepDto()
+            {
+                adtSourceNum = dto.Data.AdultNum,
+                childSourceNum = dto.Data.ChildNum,
+                cabinClass = dto.Data.CabinClass,
+                FlightNumber = dto.Data.FlightNumber,
+                carrier = dto.Data.Carrier,
+                Cabin = dto.Data.Cabin,
+                FromSegments = fromList,
+                RetSegments = toList,
+            };
+            var result = await GetPriceDetail(stepDto);
+
+            searchAirtickets_Data.PriceDetails = result;
+            return searchAirtickets_Data;
+        }
+
+        public async Task<List<SearchAirticket_PriceDetail>> GetPriceDetail(StepDto dto)
+        {
+            List<SearchAirticket_PriceDetail> result = new List<SearchAirticket_PriceDetail>();
             List<SearchAirticket_PriceDetail> res = new List<SearchAirticket_PriceDetail>();
-            foreach (var item in dto.Data.FromSegments)
+            List<SearchAirticket_PriceDetail> backRes = new List<SearchAirticket_PriceDetail>();
+            foreach (var item in dto.FromSegments)
             {
                 StepDto stepDto = new StepDto()
                 {
-                    startArea = item.DepCityCode,
-                    endArea = item.ArrCityCode,
-                    adtSourceNum = dto.Data.AdultNum,
-                    childSourceNum = dto.Data.ChildNum,
+                    startArea = item.DepAirport,
+                    endArea = item.ArrAirport,
+                    adtSourceNum = dto.adtSourceNum,
+                    childSourceNum = dto.childSourceNum,
                     fromTime = Convert.ToDateTime(item.DepDate),
-                    cabinClass = dto.Data.CabinClass,
-                    FlightNumber = dto.Data.FlightNumber,
-                    carrier = dto.Data.Carrier,
-                    Cabin = dto.Data.Cabin
+                    cabinClass = dto.cabinClass,
+                    FlightNumber = dto.FlightNumber,
+                    carrier = dto.carrier,
+                    Cabin = dto.Cabin
                 };
                 var seg = await StepSearch(stepDto);
                 res.AddRange(seg);
             }
-            searchAirtickets_Data.PriceDetails = res;
-            return searchAirtickets_Data;
+            foreach (var item in dto.RetSegments)
+            {
+                StepDto stepDto = new StepDto()
+                {
+                    startArea = item.DepAirport,
+                    endArea = item.ArrAirport,
+                    adtSourceNum = dto.adtSourceNum,
+                    childSourceNum = dto.childSourceNum,
+                    fromTime = Convert.ToDateTime(item.DepDate),
+                    cabinClass = dto.cabinClass,
+                    FlightNumber = dto.FlightNumber,
+                    carrier = dto.carrier,
+                    Cabin = dto.Cabin,
+                    IsBack = true
+                };
+                var seg = await StepSearch(stepDto);
+                backRes.AddRange(seg);
+            }
+            foreach (var come in res)
+            {
+                if (backRes.Count == 0)
+                {
+                    result.Add(come);
+                }
+                foreach (var back in backRes)
+                {
+                    var newSeg = _mapper.Map<SearchAirticket_PriceDetail, SearchAirticket_PriceDetail>(come);
+                    newSeg.RateCode = $"NK_{come.RateCode}|{back.RateCode}_{dto.adtSourceNum}_{dto.childSourceNum}";
+                    newSeg.AdultPrice = come.AdultPrice + back.AdultPrice;
+                    newSeg.AdultTax = come.AdultTax + back.AdultTax;
+                    newSeg.ChildPrice = come.ChildPrice + back.ChildPrice;
+                    newSeg.ChildTax = come.ChildTax + back.ChildTax;
+                    newSeg.RetSegments = back.RetSegments;
+                    result.Add(newSeg);
+                }
+            }
+            if (res.Count == 0)
+            {
+                foreach (var back in backRes)
+                {
+                    result.Add(back);
+                }
+            }
+            return result;
         }
 
         /// <summary>
@@ -918,7 +1053,7 @@ namespace NkFlightWeb.Service
         /// <param name="stepDto"></param>
         /// <returns></returns>
         /// <exception cref="Exception"></exception>
-        public async Task<List<SearchAirticket_PriceDetail>> StepSearch(StepDto stepDto)
+        public async Task<List<SearchAirticket_PriceDetail>> StepSearchNew(StepDto stepDto)
         {
             Stopwatch stopwatch = Stopwatch.StartNew();
             stopwatch.Start();
@@ -949,7 +1084,9 @@ namespace NkFlightWeb.Service
                 types = types
             };
             List<SearchAirticket_PriceDetail> priceList = new List<SearchAirticket_PriceDetail>();
-            var tocity = _repository.GetRepository<NkToAirlCity>().Query().FirstOrDefault(n => n.city.ToLower() == stepDto.endArea.ToLower() && n.fromcity.ToLower() == stepDto.startArea);
+            var tocity = _repository.GetRepository<NkToAirlCity>().Query()
+                .FirstOrDefault(n => n.city.ToLower() == stepDto.endArea.ToLower() || n.searchcity == stepDto.endArea.ToLower()
+            && (n.searchFromCity.ToLower() == stepDto.startArea.ToLower() || n.fromcity.ToLower() == stepDto.startArea.ToLower()));
             if (tocity == null)
             {
                 throw new Exception("不存在的城市");
@@ -1034,7 +1171,7 @@ namespace NkFlightWeb.Service
                             model.ChildPrice = childPrice * childCount;
                             model.ChildTax = childtaxPrice * childCount;
                             model.NationalityType = NationalityApplicableType.All;
-                            model.SuitAge = "0-120";
+                            model.SuitAge = "0~99";
                             model.MaxFittableNum = 9;
                             model.MinFittableNum = 1;
                             model.TicketInvoiceType = 1; //没有默认1
@@ -1073,7 +1210,7 @@ namespace NkFlightWeb.Service
                             };
                             model.Rule = rule;
                             model.DeliveryPolicy = "Standardproduct";
-                            var rateCode = $"NK_{stepDto.startArea}_{stepDto.endArea}_{fromDate}";
+                            var rateCode = $"{stepDto.startArea}_{stepDto.endArea}_{fromDate}";
                             List<SearchAirticket_Segment> segList = new List<SearchAirticket_Segment>();
                             foreach (var segment in journey.segments)
                             {
@@ -1086,7 +1223,7 @@ namespace NkFlightWeb.Service
                                     DepAirport = segment.designator.origin,
                                     ArrAirport = segment.designator.destination,
                                     DepDate = Convert.ToDateTime(segment.designator.departure).ToString("yyyy-MM-dd HH:mm"),
-                                    ArrDate = Convert.ToDateTime(segment.designator.departure).ToString("yyyy-MM-dd HH:mm"),
+                                    ArrDate = Convert.ToDateTime(segment.designator.arrival).ToString("yyyy-MM-dd HH:mm"),
                                     StopCities = segment.designator.destination,
                                     CodeShare = segment.identifier.carrierCode == "NK" ? false : true,
                                     ShareCarrier = segment.identifier.carrierCode == "NK" ? "" : segment.identifier.carrierCode,
@@ -1097,8 +1234,230 @@ namespace NkFlightWeb.Service
                                 segList.Add(seg);
                                 rateCode += $"_{seg.Carrier}{seg.FlightNumber}_{Convert.ToDateTime(seg.DepDate).ToString("yyyyMMddHHmm")}";
                             }
-                            model.FromSegments = segList;
-                            model.RateCode = $"{rateCode}_{adtNum}_{childNum}";
+                            if (stepDto.IsBack)
+                            {
+                                model.RetSegments = segList;
+                            }
+                            else
+                            {
+                                model.FromSegments = segList;
+                            }
+                            model.RateCode = $"{rateCode}";
+                            priceList.Add(model);
+                        }
+                    }
+                }
+                else
+                {
+                    throw new Exception("请稍后重试");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Api:请求发生错误，{ex.Message}");
+            }
+
+            stopwatch.Stop();
+            Log.Information($"Api:获取{priceList.Count}条数据耗时{stopwatch.ElapsedMilliseconds}ms");
+            return priceList;
+        }
+
+        /// <summary>
+        /// 搜价格接口
+        /// </summary>
+        /// <param name="stepDto"></param>
+        /// <returns></returns>
+        /// <exception cref="Exception"></exception>
+        public async Task<List<SearchAirticket_PriceDetail>> StepSearch(StepDto stepDto)
+        {
+            Stopwatch stopwatch = Stopwatch.StartNew();
+            stopwatch.Start();
+            var adtNum = stepDto.adtSourceNum.Value;
+            var childNum = stepDto.childSourceNum.Value;
+
+            var fromDate = stepDto.fromTime.Value.ToString("yyyy-MM-dd");
+
+            List<passengersType> types = new List<passengersType>();
+            if (stepDto.adtSourceNum > 0)
+            {
+                types.Add(new passengersType
+                {
+                    type = "ADT",
+                    count = adtNum,
+                });
+            }
+            if (stepDto.childSourceNum > 0)
+            {
+                types.Add(new passengersType
+                {
+                    type = "CHD",
+                    count = childNum,
+                });
+            }
+            passengers passengers = new passengers()
+            {
+                types = types
+            };
+            List<SearchAirticket_PriceDetail> priceList = new List<SearchAirticket_PriceDetail>();
+            var tocity = _repository.GetRepository<NkToAirlCity>().Query()
+                .FirstOrDefault(n => n.city.ToLower() == stepDto.endArea.ToLower() || n.searchcity == stepDto.endArea.ToLower()
+            && (n.searchFromCity.ToLower() == stepDto.startArea.ToLower() || n.fromcity.ToLower() == stepDto.startArea.ToLower()));
+            if (tocity == null)
+            {
+                throw new Exception("不存在的城市");
+            }
+            var dates = new dates
+            {
+                beginDate = stepDto.fromTime.Value.ToString("yyyy-MM-dd"),
+                endDate = stepDto.fromTime.Value.ToString("yyyy-MM-dd")
+            };
+
+            var stations = new stations
+            {
+                originStationCodes = new List<string> { tocity.searchFromCity },
+                destinationStationCodes = new List<string> { tocity.searchcity }
+            };
+            List<criteria> criteria = new List<criteria> { new criteria
+                {
+                    dates = dates,
+                    stations = stations,
+                } };
+            var sourceQuery = new SourceQueryDto
+            {
+                criteria = criteria,
+                passengers = passengers,
+            };
+            var json = JsonConvert.SerializeObject(sourceQuery);
+            try
+            {
+                dynamic data = await BuildApiRequest(json);
+
+                var error = data.errors.ToString();
+                if (string.IsNullOrWhiteSpace(error))
+                {
+                    var journeys = data.data.trips[0].journeysAvailable;
+                    if (journeys != null && journeys.Count > 0)
+                    {
+                        foreach (var journey in journeys)
+                        {
+                            var fares = JsonConvert.SerializeObject(journey.fares);
+                            if (fares == "{}")
+                            {
+                                continue;
+                            }
+                            var faresList = JsonConvert.DeserializeObject<Dictionary<string, dynamic>>(fares);
+                            SearchAirticket_PriceDetail model = new SearchAirticket_PriceDetail
+                            {
+                                Currency = data.data.currencyCode //(CurrencyEnums)Enum.Parse(typeof(CurrencyEnums), data.data.currencyCode)
+                            };
+                            var q = 1;
+                            decimal adtPrice = 0;
+                            decimal adtCount = 0;
+                            decimal adttaxPrice = 0;
+                            decimal childPrice = 0;
+                            decimal childCount = 0;
+                            decimal childtaxPrice = 0;
+                            foreach (var fare in faresList)
+                            {
+                                if (q > 1)
+                                {
+                                    break;
+                                }
+                                q++;
+                                var passengerFares = fare.Value.details.passengerFares;
+                                foreach (var peo in passengerFares)
+                                {
+                                    if (peo.passengerType == "ADT")
+                                    {
+                                        decimal.TryParse(peo.fareAmount.ToString(), out adtPrice);
+                                        decimal.TryParse(peo.multiplier.ToString(), out adtCount);
+                                        decimal.TryParse(peo.serviceCharges[1].amount.ToString(), out adttaxPrice);
+                                    }
+                                    else if (peo.passengerType == "CHD")
+                                    {
+                                        decimal.TryParse(peo.fareAmount.ToString(), out childPrice);
+                                        decimal.TryParse(peo.multiplier.ToString(), out childCount);
+                                        decimal.TryParse(peo.serviceCharges[1].amount.ToString(), out childtaxPrice);
+                                    }
+                                }
+                            }
+                            model.AdultPrice = adtPrice * adtCount;
+                            model.AdultTax = adttaxPrice * adtCount;
+                            model.ChildPrice = childPrice * childCount;
+                            model.ChildTax = childtaxPrice * childCount;
+                            model.NationalityType = NationalityApplicableType.All;
+                            model.SuitAge = "0~99";
+                            model.MaxFittableNum = 9;
+                            model.MinFittableNum = 1;
+                            model.TicketInvoiceType = 1; //没有默认1
+                            model.TicketAirline = "NK";
+                            List<AirticketRuleItem> refundRule = new List<AirticketRuleItem>();
+                            refundRule.Add(new AirticketRuleItem
+                            {
+                                FlightStatus = FlightStatus.BeforeTakeOff,
+                                Hours = 6 * 24,
+                                Penalty = 119
+                            });
+                            refundRule.Add(new AirticketRuleItem
+                            {
+                                FlightStatus = FlightStatus.BeforeTakeOff,
+                                Hours = 30 * 24,
+                                Penalty = 99
+                            });
+                            refundRule.Add(new AirticketRuleItem
+                            {
+                                FlightStatus = FlightStatus.BeforeTakeOff,
+                                Hours = 59 * 24,
+                                Penalty = 69
+                            });
+                            refundRule.Add(new AirticketRuleItem
+                            {
+                                FlightStatus = FlightStatus.BeforeTakeOff,
+                                Hours = 60 * 24,
+                                Penalty = 0
+                            });
+                            SearchAirticket_Rule rule = new SearchAirticket_Rule
+                            {
+                                HasRefund = true, //设置可退
+                                RefundRule = refundRule,
+                                HasChangeDate = true, //设置可改
+                                ChangeDateRule = refundRule,
+                            };
+                            model.Rule = rule;
+                            model.DeliveryPolicy = "Standardproduct";
+                            var rateCode = $"{stepDto.startArea}_{stepDto.endArea}_{fromDate}";
+                            List<SearchAirticket_Segment> segList = new List<SearchAirticket_Segment>();
+                            foreach (var segment in journey.segments)
+                            {
+                                var eq = segment.legs[0].legInfo.equipmentType.ToString();
+                                SearchAirticket_Segment seg = new SearchAirticket_Segment()
+                                {
+                                    Carrier = segment.identifier.carrierCode,
+                                    CabinClass = CabinClass.EconomyClass,
+                                    FlightNumber = segment.identifier.identifier,
+                                    DepAirport = segment.designator.origin,
+                                    ArrAirport = segment.designator.destination,
+                                    DepDate = Convert.ToDateTime(segment.designator.departure).ToString("yyyy-MM-dd HH:mm"),
+                                    ArrDate = Convert.ToDateTime(segment.designator.arrival).ToString("yyyy-MM-dd HH:mm"),
+                                    StopCities = segment.designator.destination,
+                                    CodeShare = segment.identifier.carrierCode == "NK" ? false : true,
+                                    ShareCarrier = segment.identifier.carrierCode == "NK" ? "" : segment.identifier.carrierCode,
+                                    ShareFlightNumber = segment.identifier.carrierCode == "NK" ? "" : segment.identifier.identifier,
+                                    AircraftCode = await GetAircraftCodeByEq(eq),
+                                    BaggageRule = await BuildBaggageRule()
+                                };
+                                segList.Add(seg);
+                                rateCode += $"_{seg.Carrier}{seg.FlightNumber}_{Convert.ToDateTime(seg.DepDate).ToString("yyyyMMddHHmm")}";
+                            }
+                            if (stepDto.IsBack)
+                            {
+                                model.RetSegments = segList;
+                            }
+                            else
+                            {
+                                model.FromSegments = segList;
+                            }
+                            model.RateCode = $"{rateCode}";
                             priceList.Add(model);
                         }
                     }
@@ -1146,10 +1505,10 @@ namespace NkFlightWeb.Service
                 {
                     var header = JsonConvert.DeserializeObject<Dictionary<string, string>>(dbToken.Headers);
                     header.Add("Accept-Encoding", "utf-8");
-                    var res = HttpHelper.HttpOriginPost(apiUrl, json, header);
+                    var res = HttpHelper.HttpOriginPost(apiUrl, json, header, cookies: dbToken.Cookies);
                     dynamic data = JsonConvert.DeserializeObject(res);
-                    var during = dbToken.PassTime.Value - DateTime.Now;
 
+                    var during = dbToken.PassTime.Value - DateTime.Now;
                     Log.Information($"Api:距离token过期{during.TotalSeconds}s");
                     // dbToken.UseTime = DateTime.Now;
                     return data;
@@ -1157,8 +1516,10 @@ namespace NkFlightWeb.Service
                 catch (Exception ex)
                 {
                     Log.Error($"Api:请求发生错误，使用时间:{dbToken.UseTime}过期时间:{dbToken.PassTime}出错{ex.Message}");
+                    Log.Information($"Api:【{dbToken.Token}】【{dbToken.Cookies}】");
                     //当出现403 主动去获取token 重试3次
-                    if (ex.Message.Contains("403") && i < 3)
+                    //if (ex.Message.Contains("403") && i < 3)
+                    if (i < 3)
                     {
                         var token = await BuildToken();
                         Log.Error($"Api:403主动获取token{token}");
@@ -1181,16 +1542,12 @@ namespace NkFlightWeb.Service
                 throw new Exception("找不到报价编码");
             }
             var flyList = dto.Data.RateCode.Split("_").ToList();
-            var startArea = flyList[1];
-            var endArea = flyList[2];
-            var date = flyList[3];
             StepDto stepDto = new StepDto()
             {
-                fromTime = Convert.ToDateTime(date),
                 adtSourceNum = dto.Data.AdultNum,
                 childSourceNum = dto.Data.ChildNum,
-                startArea = startArea,
-                endArea = endArea,
+                FromSegments = _mapper.Map<SearchAirticket_Segment, SegmentLineDetail>(dto.Data.FromSegments),
+                RetSegments = _mapper.Map<SearchAirticket_Segment, SegmentLineDetail>(dto.Data.RetSegments),
             };
             var existModel = await GetPriceDetailByRateCode(dto.Data.RateCode, stepDto);
             if (existModel != null)
@@ -1216,7 +1573,7 @@ namespace NkFlightWeb.Service
         /// <returns></returns>
         public async Task<SearchAirticket_PriceDetail> GetPriceDetailByRateCode(string dbrateCode, StepDto stepDto)
         {
-            var list = await StepSearch(stepDto);
+            var list = await GetPriceDetail(stepDto);
             return list.FirstOrDefault(n => n.RateCode == dbrateCode);
         }
 
@@ -1237,23 +1594,22 @@ namespace NkFlightWeb.Service
             var carrier = flyList[0];
             StepDto stepDto = new StepDto()
             {
-                fromTime = fromTime,
                 adtSourceNum = adtSourceNum,
                 childSourceNum = childSourceNum,
-                startArea = startArea,
-                endArea = endArea,
-                carrier = carrier,
+                FromSegments = _mapper.Map<SearchAirticket_Segment, SegmentLineDetail>(dto.Data.FromSegments),
+                RetSegments = _mapper.Map<SearchAirticket_Segment, SegmentLineDetail>(dto.Data.RetSegments),
             };
             try
             {
                 var model = await GetPriceDetailByRateCode(reRateCode, stepDto);
                 if (model != null && model.RateCode == reRateCode)
                 {
+                    var pnr = await CreatePnr(new pnrCreateModel { orderId = dto.Data.OrderId });
                     using var transaction = await _repository.BeginTransactionAsync();
                     NKFlightOrder order = new NKFlightOrder
                     {
                         OrderId = Guid.NewGuid().ToString(),
-                        PNR = "", //表示虚拟单
+                        PNR = pnr, //表示虚拟单
                         PayCode = "",
                         Refer = "",
                         Currency = model.Currency,
@@ -1329,7 +1685,7 @@ namespace NkFlightWeb.Service
                     await transaction.CommitAsync();
                     return new CreateOrder_Data
                     {
-                        SupplierOrderId = order.OrderId.ToString(),
+                        SupplierOrderId = order.OrderId,
                         BookingPNR = order.PNR,
                         MaxSeats = adtSourceNum + childSourceNum,
                         Currency = model.Currency,
@@ -1454,28 +1810,20 @@ namespace NkFlightWeb.Service
                 item.CredentialsExpired = dbPeo.CredentialsExpired;
                 passengers.Add(item);
             }
-            if (string.IsNullOrWhiteSpace(order.PNR) || order.PNR.Contains("NA_"))
-            {
-                //虚拟单
-                return new QueryOrder_Data
-                {
-                    Success = true,
-                    OrderId = dto.Data.OrderId,
-                    SupplierOrderId = order.OrderId,
-                    BookingPNR = order.PNR,
-                    IsTicketIssuance = false,
-                    SupplierOrginOrderStatus = order.Status.ToString(),
-                    OrderStatus = (SupplierOrderStatus)order.Status,
-                    Currency = order.Currency,
-                    TotalPrice = order.SumPrice.Value,
-                    Tax = order.TaxPrice.Value,
-                    Passengers = passengers,
-                    FromSegments = segList
-                };
-            }
             return new QueryOrder_Data
             {
-                Success = false
+                Success = true,
+                OrderId = dto.Data.OrderId,
+                SupplierOrderId = order.OrderId,
+                BookingPNR = order.PNR,
+                IsTicketIssuance = false,
+                SupplierOrginOrderStatus = order.Status.ToString(),
+                OrderStatus = (SupplierOrderStatus)order.Status,
+                Currency = order.Currency,
+                TotalPrice = order.SumPrice.Value,
+                Tax = order.TaxPrice.Value,
+                Passengers = passengers,
+                FromSegments = segList
             };
         }
 
@@ -1491,16 +1839,32 @@ namespace NkFlightWeb.Service
                     Message = "找不到订单信息"
                 };
             }
-
-            StepDto stepDto = new StepDto
+            List<SegmentLineDetail> fromList = new List<SegmentLineDetail>();
+            foreach (var seg in dto.Data.FromSegments)
+            {
+                fromList.Add(new SegmentLineDetail
+                {
+                    ArrAirport = seg.ArrAirport,
+                    DepAirport = seg.DepAirport,
+                    DepDate = seg.DepDate.ToString("yyyy-MM-dd")
+                });
+            }
+            List<SegmentLineDetail> tolList = new List<SegmentLineDetail>();
+            foreach (var seg in dto.Data.RetSegments)
+            {
+                tolList.Add(new SegmentLineDetail
+                {
+                    ArrAirport = seg.ArrAirport,
+                    DepAirport = seg.DepAirport,
+                    DepDate = seg.DepDate.ToString("yyyy-MM-dd")
+                });
+            }
+            StepDto stepDto = new StepDto()
             {
                 adtSourceNum = order.Adult,
                 childSourceNum = order.Child,
-                carrier = order.Carrier,
-                startArea = order.startArea,
-                endArea = order.endArea,
-                fromTime = order.FlyDate,
-                cabinClass = order.CabinClass
+                FromSegments = fromList,
+                RetSegments = tolList,
             };
             var model = await GetPriceDetailByRateCode(order.RateCode, stepDto);
             if (model != null && model.RateCode == model.RateCode)
@@ -1516,6 +1880,43 @@ namespace NkFlightWeb.Service
                 res.Message = "该订单不可预定";
             }
             return res;
+        }
+
+        /// <summary>
+        /// 调用供应商 生成假的 pnr码
+        /// </summary>
+        /// <returns></returns>
+        public async Task<string> CreatePnr(pnrCreateModel model)
+        {
+            var client = await GetClientKey();
+            try
+            {
+                var timeSpan = GetTimeStamp();
+                var md5 = GetMD5WithString($"{client.AppId}{client.AccessKey}{timeSpan}");
+                var appid = client.AppId;
+                /*       timeSpan = "20240509174541";
+                       appid = "d6167818-85af-4a23-9114-3ea3f816acc5";
+                       md5 = "c12ddfac153fb7bc7819d02da977b284";*/
+                OsCreatePnrRequest postdata = new OsCreatePnrRequest
+                {
+                    authration = new authration
+                    {
+                        appId = appid,
+                        timespan = timeSpan,
+                        token = md5
+                    },
+                    orderId = model.orderId,
+                    bookingPNR = model.bookingPNR
+                };
+                var response = HttpHelper.PostAjaxData(_setting.CreatePnrUrl, JsonConvert.SerializeObject(postdata), Encoding.UTF8);
+                var res = JsonConvert.DeserializeObject<OsCreatePnrResponse>(response);
+                return res?.result?.bookingPNR;
+            }
+            catch (Exception ex)
+            {
+                var ss = ex.Message;
+            }
+            return "";
         }
     }
 }

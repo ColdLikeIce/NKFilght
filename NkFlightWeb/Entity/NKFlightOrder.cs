@@ -12,7 +12,7 @@ namespace NkFlightWeb.Entity
         public string OrderId { get; set; }
 
         public long platOrderId { get; set; }
-        public string PNR { get; set; }
+        public string? PNR { get; set; }
         public string PayCode { get; set; }
         public string? Refer { get; set; }
         public CabinClass? CabinClass { get; set; }
