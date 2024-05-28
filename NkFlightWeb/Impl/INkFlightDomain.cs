@@ -1,4 +1,6 @@
 ﻿using CommonCore.Dependency;
+using CommonCore.EntityFramework.Common;
+using NkFlightWeb.Db;
 using NkFlightWeb.Service.Dto;
 using Qunar.Airtickets.Supplier.Concat.Dtos.Input;
 using Qunar.Airtickets.Supplier.Concat.Dtos.Output;
@@ -28,5 +30,7 @@ namespace NkFlightWeb.Impl
         Task<string> BuildCity();
 
         Task<bool> PushAllFlightToDb(SearchDayDto dto);
+
+        Task<IBaseRepository<HeyTripDbContext>> GetRto();
     }
 }

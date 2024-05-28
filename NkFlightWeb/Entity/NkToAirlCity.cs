@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace NkFlightWeb.Entity
 {
-    [Table("NkToAirlCity")]
+    [Table("Nk_ToAirlCity")]
     public class NkToAirlCity
     {
         [Key]

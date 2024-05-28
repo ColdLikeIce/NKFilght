@@ -47,6 +47,7 @@ namespace NkFlightWeb.Entity
         public DateTime? UTime { get; set; }
         public DateTime? CancelTime { get; set; }
         public virtual List<NKAirlSegment> Segment { get; set; }
+        public virtual List<NKAirlToSegment> ToSegment { get; set; }
         public virtual List<NKAirlPassenger> NKAirlPassenger { get; set; }
     }
 

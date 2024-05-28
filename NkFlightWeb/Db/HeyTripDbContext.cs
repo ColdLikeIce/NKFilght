@@ -30,6 +30,10 @@ namespace NkFlightWeb.Db
               .HasOne(b => b.AirlOrder)
               .WithMany(x => x.Segment)
               .HasForeignKey(b => b.OrderId);
+            modelBuilder.Entity<NKAirlToSegment>()
+             .HasOne(b => b.AirlOrder)
+             .WithMany(x => x.ToSegment)
+             .HasForeignKey(b => b.OrderId);
             modelBuilder.Entity<NKAirlPassenger>()
               .HasOne(b => b.AirlOrder)
               .WithMany(x => x.NKAirlPassenger)
@@ -43,6 +47,7 @@ namespace NkFlightWeb.Db
 
         public DbSet<NKAirlPassenger> NKAirlPassenger { get; set; }
         public DbSet<NKAirlSegment> NKAirlSegment { get; set; }
+        public DbSet<NKAirlToSegment> NKAirlToSegment { get; set; }
         public DbSet<NKFlightOrder> NKFlightOrder { get; set; }
     }
 }

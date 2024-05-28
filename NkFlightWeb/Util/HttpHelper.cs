@@ -291,17 +291,6 @@ namespace NkFlightWeb.Util
             httpWebRequest.GetRequestStream().Write(bs, 0, bs.Length);
             //发送请求
             HttpWebResponse httpWebResponse = (HttpWebResponse)httpWebRequest.GetResponse();
-            /*   foreach (var item in httpWebResponse.Headers)
-               {
-                   if (item.Key == "Set-Cookie")
-                   {
-                       var coo = item.Value;
-                       foreach (var key in coo)
-                       {
-                           Log.Information($"{key}");
-                       }
-                   }
-               }*/
             //读取返回数据
             StreamReader streamReader = new StreamReader(httpWebResponse.GetResponseStream(), Encoding.UTF8);
             string responseContent = streamReader.ReadToEnd();

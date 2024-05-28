@@ -6,6 +6,7 @@ using DtaAccess.Domain.Enums;
 using DtaAccess.Domain.Models;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Playwright;
 using Newtonsoft.Json;
@@ -49,13 +50,16 @@ namespace NkFlightWeb.Service
         private readonly IConfiguration _configuration;
         private readonly AppSetting _setting;
         private readonly IMapper _mapper;
+        private readonly IServiceProvider _serviceProvider;
 
-        public NkFlightDomain(IConfiguration configuration, IOptions<AppSetting> options, IBaseRepository<HeyTripDbContext> repository, IMapper mapper)
+        public NkFlightDomain(IConfiguration configuration, IOptions<AppSetting> options,
+            IBaseRepository<HeyTripDbContext> repository, IMapper mapper, IServiceProvider serviceProvider)
         {
             _setting = options.Value;
             _configuration = configuration;
             _repository = repository;
             _mapper = mapper;
+            _serviceProvider = serviceProvider;
         }
 
         private async Task<bool> JustToken()
@@ -813,79 +817,17 @@ namespace NkFlightWeb.Service
             var date = DateTime.Now.Date.AddDays(dto.day.Value);
             var journeyRe = _repository.GetRepository<NKJourney>();
             var segmentRe = _repository.GetRepository<NKSegment>();
-            Stopwatch stopwatch = Stopwatch.StartNew();
+            //内存队列
+            var queue = new CustomMemoryQueue<JourneyInsertModel>();
+
+            var se = _serviceProvider;
             foreach (var tocity in AllTo)
             {
                 var index = AllTo.IndexOf(tocity);
                 try
                 {
-                    stopwatch.Restart();
-                    StepDto stepDto = new StepDto()
-                    {
-                        startArea = tocity.fromcity,
-                        endArea = tocity.city,
-                        adtSourceNum = dto.AtdNum,
-                        childSourceNum = dto.ChildNum,
-                        fromTime = date
-                    };
-                    var resList = await StepSearch(stepDto);
-                    if (resList.Count > 0)
-                    {
-                        using var transaction = await _repository.BeginTransactionAsync();
-                        NKJourney lionAirlJourney = new NKJourney
-                        {
-                            JourneyId = Guid.NewGuid(),
-                            TripType = (int)FlightSegmentType.OneWay,
-                            DepCity = tocity.fromcity,
-                            ArrCity = tocity.city,
-                            DepTime = Convert.ToDateTime(date),
-                            Adult = dto.AtdNum,
-                            Child = dto.ChildNum,
-                            RequestTime = DateTime.Now
-                        };
-                        List<NKSegment> segments = new List<NKSegment>();
-                        List<string> rateCodes = resList.Select(n => n.RateCode).Distinct().ToList();
-                        var dbRegList = await segmentRe.Query().Where(n => rateCodes.Contains(n.RateCode)).ToListAsync();
-                        foreach (var item in resList)
-                        {
-                            foreach (var seg in item.FromSegments)
-                            {
-                                NKSegment segment = new NKSegment
-                                {
-                                    SegmentId = Guid.NewGuid(),
-                                    JourneyId = lionAirlJourney.JourneyId,
-                                    RateCode = item.RateCode,
-                                    Carrier = seg.Carrier,
-                                    Cabin = seg.Cabin,
-                                    CabinClass = (int)seg.CabinClass,
-                                    FlightNumber = seg.FlightNumber,
-                                    DepAirport = seg.DepAirport,
-                                    ArrAirport = seg.ArrAirport,
-                                    DepDate = seg.DepDate,
-                                    ArrDate = seg.ArrDate,
-                                    StopCities = seg.StopCities,
-                                    CodeShare = seg.CodeShare,
-                                    ShareCarrier = seg.ShareCarrier,
-                                    ShareFlightNumber = seg.ShareFlightNumber,
-                                    AircraftCode = seg.AircraftCode,
-                                    Group = seg.Group,
-                                    FareBasis = seg.FareBasis,
-                                    GdsType = seg.GdsType == null ? null : (int)seg.GdsType,
-                                    PosArea = seg.PosArea,
-                                    AirlinePnrCode = seg.AirlinePnrCode,
-                                    BaggageRule = seg.BaggageRule == null ? "" : JsonConvert.SerializeObject(seg.BaggageRule),
-                                };
-                                segments.Add(segment);
-                            }
-                        }
-                        await segmentRe.BatchDeleteAsync(dbRegList);
-                        await journeyRe.InsertAsync(lionAirlJourney);
-                        await segmentRe.BatchInsertAsync(segments);
-                        await transaction.CommitAsync();
-                    }
-                    stopwatch.Stop();
-                    Log.Information($"Api:【{index}】抓取到数据{resList.Count}条报价数据耗时{stopwatch.ElapsedMilliseconds}ms");
-                    await Task.Delay(5000);
+                    Task.Run(() => DetailWithDb(date, dto, se, queue, tocity, index));
+                    //await Task.Delay(5000);
                 }
                 catch (Exception ex)
                 {
@@ -893,7 +835,156 @@ namespace NkFlightWeb.Service
                     Log.Error($"{tocity.fromcity}_{tocity.city}_{date}获取失败 {ex.Message}");
                 }
             }
+            while (true)
+            {
+                try
+                {
+                    var model = new JourneyInsertModel();
+                    var has = queue.TryDequeue(out model);
+                    if (has)
+                    {
+                        using var transaction = await _repository.BeginTransactionAsync();
+                        await segmentRe.BatchDeleteAsync(model.dbRegList);
+                        await journeyRe.InsertAsync(model.NKJourney);
+                        await segmentRe.BatchInsertAsync(model.SegList);
+                        await transaction.CommitAsync();
+                        Log.Information($"Api:Commint提交【{model.index}】成功");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"退站出错{ex.Message}");
+                }
+            }
             return true;
+        }
+
+        private static SemaphoreSlim semaphore = new SemaphoreSlim(3); // 控制同时运行的线程数量为10
+
+        public async Task<IBaseRepository<HeyTripDbContext>> GetRto()
+        {
+            return _repository;
+        }
+
+        public async Task DetailWithDb(DateTime date, SearchDayDto dto, IServiceProvider service, CustomMemoryQueue<JourneyInsertModel> queue, NkToAirlCity tocity, int index)
+        {
+            await semaphore.WaitAsync(); // 尝试获取信号量，如果无法获取则等待
+            try
+            {
+                using var scope = service.CreateAsyncScope();
+                var _domain = scope.ServiceProvider.GetRequiredService<INkFlightDomain>();
+                var repository = await _domain.GetRto();
+                var journeyRe = repository.GetRepository<NKJourney>();
+                var segmentRe = repository.GetRepository<NKSegment>();
+                Stopwatch stopwatch = Stopwatch.StartNew();
+                stopwatch.Start();
+                StepDto stepDto = new StepDto()
+                {
+                    startArea = tocity.searchcity,
+                    endArea = tocity.city,
+                    adtSourceNum = dto.AtdNum,
+                    childSourceNum = dto.ChildNum,
+                    fromTime = date,
+                    FromSegments = new List<SegmentLineDetail>
+                        {
+                            new SegmentLineDetail
+                            {
+                                ArrAirport = tocity.searchcity,
+                                DepAirport=tocity.searchFromCity,
+                                DepDate=date.ToString("yyyy-MM-dd")
+                            }
+                        }
+                };
+                var resList = await GetPriceDetail(stepDto);
+                if (resList.Count > 0)
+                {
+                    //using var transaction = await _repository.BeginTransactionAsync();
+                    NKJourney lionAirlJourney = new NKJourney
+                    {
+                        JourneyId = Guid.NewGuid(),
+                        TripType = (int)FlightSegmentType.OneWay,
+                        DepCity = tocity.searchFromCity,
+                        ArrCity = tocity.searchcity,
+                        DepTime = Convert.ToDateTime(date),
+                        Adult = dto.AtdNum,
+                        Child = dto.ChildNum,
+                        RequestTime = DateTime.Now
+                    };
+                    List<NKSegment> segments = new List<NKSegment>();
+                    List<string> rateCodes = resList.Select(n => n.RateCode).Distinct().ToList();
+                    var dbRegList = await segmentRe.Query().Where(n => rateCodes.Contains(n.RateCode)).ToListAsync();
+                    foreach (var item in resList)
+                    {
+                        foreach (var seg in item.FromSegments)
+                        {
+                            NKSegment segment = new NKSegment
+                            {
+                                SegmentId = Guid.NewGuid(),
+                                JourneyId = lionAirlJourney.JourneyId,
+                                RateCode = item.RateCode,
+                                Carrier = seg.Carrier,
+                                Cabin = seg.Cabin,
+                                CabinClass = (int)seg.CabinClass,
+                                FlightNumber = seg.FlightNumber,
+                                DepAirport = seg.DepAirport,
+                                ArrAirport = seg.ArrAirport,
+                                DepDate = seg.DepDate,
+                                ArrDate = seg.ArrDate,
+                                StopCities = seg.StopCities,
+                                CodeShare = seg.CodeShare,
+                                ShareCarrier = seg.ShareCarrier,
+                                ShareFlightNumber = seg.ShareFlightNumber,
+                                AircraftCode = seg.AircraftCode,
+                                Group = seg.Group,
+                                FareBasis = seg.FareBasis,
+                                GdsType = seg.GdsType == null ? null : (int)seg.GdsType,
+                                PosArea = seg.PosArea,
+                                AirlinePnrCode = seg.AirlinePnrCode,
+                                BaggageRule = seg.BaggageRule == null ? "" : JsonConvert.SerializeObject(seg.BaggageRule),
+                            };
+                            segments.Add(segment);
+                        }
+                    }
+                    JourneyInsertModel insertModel = new JourneyInsertModel
+                    {
+                        dbRegList = dbRegList,
+                        SegList = segments,
+                        NKJourney = lionAirlJourney,
+                        index = index
+                    };
+                    Log.Information($"Api:{index}入队列");
+                    queue.Enqueue(insertModel);
+                    /*  var i = 1;
+                      while (i < 100)
+                      {
+                          try
+                          {
+                              await segmentRe.BatchDeleteAsync(dbRegList);
+                              await journeyRe.InsertAsync(lionAirlJourney);
+                              await segmentRe.BatchInsertAsync(segments);
+                              await transaction.CommitAsync();
+                              Log.Information($"Api:Commint提交【{index}】【{i}】成功");
+                              break;
+                          }
+                          catch (Exception ex)
+                          {
+                              await transaction.RollbackAsync();
+                              i++;
+                              Log.Error($"Api:Commint提交【{index}】【{i}】失败{ex.Message}");
+                          }
+                      }*/
+                }
+                stopwatch.Stop();
+                Log.Information($"Api:【{index}】抓取到数据{resList.Count}条报价数据耗时{stopwatch.ElapsedMilliseconds}");
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Api:【{index}】报错{ex.Message}");
+            }
+            finally
+            {
+                semaphore.Release();
+            }
         }
 
         private async Task<string> GetShortCity(string city)
@@ -974,55 +1065,65 @@ namespace NkFlightWeb.Service
                 RetSegments = toList,
             };
             var result = await GetPriceDetail(stepDto);
-
+            
             searchAirtickets_Data.PriceDetails = result;
             return searchAirtickets_Data;
         }
 
         public async Task<List<SearchAirticket_PriceDetail>> GetPriceDetail(StepDto dto)
         {
-            List<SearchAirticket_PriceDetail> result = new List<SearchAirticket_PriceDetail>();
+            if (dto.FromSegments.Count > 0)
+            {
+                dto.FromSegments = new List<SegmentLineDetail>
+                    {
+                        new SegmentLineDetail
+                        {
+                            ArrAirport = dto.FromSegments.LastOrDefault().ArrAirport,
+                            DepAirport = dto.FromSegments.FirstOrDefault().DepAirport,
+                            DepDate = Convert.ToDateTime(dto.FromSegments.FirstOrDefault().DepDate).ToString("yyyy-MM-dd")
+                        }
+                    };
+            }
+            if (dto.RetSegments.Count > 0)
+            {
+                dto.RetSegments = new List<SegmentLineDetail>
+                    {
+                        new SegmentLineDetail
+                        {
+                            ArrAirport = dto.RetSegments.LastOrDefault().ArrAirport,
+                            DepAirport = dto.RetSegments.FirstOrDefault().DepAirport,
+                            DepDate = Convert.ToDateTime(dto.RetSegments.FirstOrDefault().DepDate).ToString("yyyy-MM-dd")
+                        }
+                    };
+            }
+            var segList = await StepSearch(dto);
             List<SearchAirticket_PriceDetail> res = new List<SearchAirticket_PriceDetail>();
-            List<SearchAirticket_PriceDetail> backRes = new List<SearchAirticket_PriceDetail>();
             foreach (var item in dto.FromSegments)
             {
-                StepDto stepDto = new StepDto()
+                var key = $"{Convert.ToDateTime(item.DepDate).ToString("yyyy-MM-dd")}_{item.DepAirport}_{item.ArrAirport}";
+                var dict = segList.FirstOrDefault(n => n.Key == key);
+                if (dict != null)
                 {
-                    startArea = item.DepAirport,
-                    endArea = item.ArrAirport,
-                    adtSourceNum = dto.adtSourceNum,
-                    childSourceNum = dto.childSourceNum,
-                    fromTime = Convert.ToDateTime(item.DepDate),
-                    cabinClass = dto.cabinClass,
-                    FlightNumber = dto.FlightNumber,
-                    carrier = dto.carrier,
-                    Cabin = dto.Cabin
-                };
-                var seg = await StepSearch(stepDto);
-                res.AddRange(seg);
+                    res = dict.Detail;
+                }
             }
+
+            List<SearchAirticket_PriceDetail> backRes = new List<SearchAirticket_PriceDetail>();
             foreach (var item in dto.RetSegments)
             {
-                StepDto stepDto = new StepDto()
+                var key = $"{Convert.ToDateTime(item.DepDate).ToString("yyyy-MM-dd")}_{item.DepAirport}_{item.ArrAirport}";
+                var dict = segList.FirstOrDefault(n => n.Key == key);
+                if (dict != null)
                 {
-                    startArea = item.DepAirport,
-                    endArea = item.ArrAirport,
-                    adtSourceNum = dto.adtSourceNum,
-                    childSourceNum = dto.childSourceNum,
-                    fromTime = Convert.ToDateTime(item.DepDate),
-                    cabinClass = dto.cabinClass,
-                    FlightNumber = dto.FlightNumber,
-                    carrier = dto.carrier,
-                    Cabin = dto.Cabin,
-                    IsBack = true
-                };
-                var seg = await StepSearch(stepDto);
-                backRes.AddRange(seg);
+                    backRes = dict.Detail;
+                }
             }
+            List<SearchAirticket_PriceDetail> result = new List<SearchAirticket_PriceDetail>();
             foreach (var come in res)
             {
                 if (backRes.Count == 0)
                 {
+                    come.RateCode = $"NK_{come.RateCode}_{dto.adtSourceNum}_{dto.childSourceNum}";
                     result.Add(come);
                 }
                 foreach (var back in backRes)
@@ -1041,9 +1142,11 @@ namespace NkFlightWeb.Service
             {
                 foreach (var back in backRes)
                 {
+                    back.RateCode = $"NK_{back.RateCode}_{dto.adtSourceNum}_{dto.childSourceNum}";
                     result.Add(back);
                 }
             }
+            Log.Information($"Api:获取到报价{result.Count}去程{res.Count}来程{backRes.Count}");
             return result;
         }
 
@@ -1053,14 +1156,13 @@ namespace NkFlightWeb.Service
         /// <param name="stepDto"></param>
         /// <returns></returns>
         /// <exception cref="Exception"></exception>
-        public async Task<List<SearchAirticket_PriceDetail>> StepSearchNew(StepDto stepDto)
+        public async Task<List<PriceDetailDict>> StepSearch(StepDto stepDto)
         {
+            var result = new List<PriceDetailDict>();
             Stopwatch stopwatch = Stopwatch.StartNew();
             stopwatch.Start();
             var adtNum = stepDto.adtSourceNum.Value;
             var childNum = stepDto.childSourceNum.Value;
-
-            var fromDate = stepDto.fromTime.Value.ToString("yyyy-MM-dd");
 
             List<passengersType> types = new List<passengersType>();
             if (stepDto.adtSourceNum > 0)
@@ -1083,33 +1185,54 @@ namespace NkFlightWeb.Service
             {
                 types = types
             };
-            List<SearchAirticket_PriceDetail> priceList = new List<SearchAirticket_PriceDetail>();
-            var tocity = _repository.GetRepository<NkToAirlCity>().Query()
-                .FirstOrDefault(n => n.city.ToLower() == stepDto.endArea.ToLower() || n.searchcity == stepDto.endArea.ToLower()
-            && (n.searchFromCity.ToLower() == stepDto.startArea.ToLower() || n.fromcity.ToLower() == stepDto.startArea.ToLower()));
-            if (tocity == null)
+            /*  var tocity = _repository.GetRepository<NkToAirlCity>().Query()
+                  .FirstOrDefault(n => n.city.ToLower() == stepDto.endArea.ToLower() || n.searchcity == stepDto.endArea.ToLower()
+              && (n.searchFromCity.ToLower() == stepDto.startArea.ToLower() || n.fromcity.ToLower() == stepDto.startArea.ToLower()));
+              if (tocity == null)
+              {
+                  throw new Exception("不存在的城市");
+              }*/
+            List<criteria> criteriaList = new List<criteria>();
+            foreach (var seg in stepDto.FromSegments)
             {
-                throw new Exception("不存在的城市");
-            }
-            var dates = new dates
-            {
-                beginDate = stepDto.fromTime.Value.ToString("yyyy-MM-dd"),
-                endDate = stepDto.fromTime.Value.ToString("yyyy-MM-dd")
-            };
-
-            var stations = new stations
-            {
-                originStationCodes = new List<string> { tocity.searchFromCity },
-                destinationStationCodes = new List<string> { tocity.searchcity }
-            };
-            List<criteria> criteria = new List<criteria> { new criteria
+                var dates = new dates
+                {
+                    beginDate = Convert.ToDateTime(seg.DepDate).ToString("yyyy-MM-dd"),
+                    endDate = Convert.ToDateTime(seg.DepDate).ToString("yyyy-MM-dd")
+                };
+                var stations = new stations
+                {
+                    originStationCodes = new List<string> { seg.DepAirport },
+                    destinationStationCodes = new List<string> { seg.ArrAirport }
+                };
+                criteriaList.Add(new criteria
                 {
                     dates = dates,
                     stations = stations,
-                } };
+                });
+            }
+
+            foreach (var seg in stepDto.RetSegments)
+            {
+                var dates = new dates
+                {
+                    beginDate = Convert.ToDateTime(seg.DepDate).ToString("yyyy-MM-dd"),
+                    endDate = Convert.ToDateTime(seg.DepDate).ToString("yyyy-MM-dd")
+                };
+                var stations = new stations
+                {
+                    originStationCodes = new List<string> { seg.DepAirport },
+                    destinationStationCodes = new List<string> { seg.ArrAirport }
+                };
+                criteriaList.Add(new criteria
+                {
+                    dates = dates,
+                    stations = stations,
+                });
+            }
             var sourceQuery = new SourceQueryDto
             {
-                criteria = criteria,
+                criteria = criteriaList,
                 passengers = passengers,
             };
             var json = JsonConvert.SerializeObject(sourceQuery);
@@ -1120,130 +1243,149 @@ namespace NkFlightWeb.Service
                 var error = data.errors.ToString();
                 if (string.IsNullOrWhiteSpace(error))
                 {
-                    var journeys = data.data.trips[0].journeysAvailable;
-                    if (journeys != null && journeys.Count > 0)
+                    var trips = data.data.trips;
+                    if (trips != null && trips.Count > 0)
                     {
-                        foreach (var journey in journeys)
+                        for (var i = 0; i < trips.Count; i++)
                         {
-                            var fares = JsonConvert.SerializeObject(journey.fares);
-                            if (fares == "{}")
+                            var cri = criteriaList[i];
+                            List<SearchAirticket_PriceDetail> priceList = new List<SearchAirticket_PriceDetail>();
+                            var journeys = data.data.trips[i].journeysAvailable;
+                            if (journeys != null && journeys.Count > 0)
                             {
-                                continue;
-                            }
-                            var faresList = JsonConvert.DeserializeObject<Dictionary<string, dynamic>>(fares);
-                            SearchAirticket_PriceDetail model = new SearchAirticket_PriceDetail
-                            {
-                                Currency = data.data.currencyCode //(CurrencyEnums)Enum.Parse(typeof(CurrencyEnums), data.data.currencyCode)
-                            };
-                            var q = 1;
-                            decimal adtPrice = 0;
-                            decimal adtCount = 0;
-                            decimal adttaxPrice = 0;
-                            decimal childPrice = 0;
-                            decimal childCount = 0;
-                            decimal childtaxPrice = 0;
-                            foreach (var fare in faresList)
-                            {
-                                if (q > 1)
+                                foreach (var journey in journeys)
                                 {
-                                    break;
-                                }
-                                q++;
-                                var passengerFares = fare.Value.details.passengerFares;
-                                foreach (var peo in passengerFares)
-                                {
-                                    if (peo.passengerType == "ADT")
+                                    var fares = JsonConvert.SerializeObject(journey.fares);
+                                    if (fares == "{}")
                                     {
-                                        decimal.TryParse(peo.fareAmount.ToString(), out adtPrice);
-                                        decimal.TryParse(peo.multiplier.ToString(), out adtCount);
-                                        decimal.TryParse(peo.serviceCharges[1].amount.ToString(), out adttaxPrice);
+                                        continue;
                                     }
-                                    else if (peo.passengerType == "CHD")
+                                    var faresList = JsonConvert.DeserializeObject<Dictionary<string, dynamic>>(fares);
+                                    SearchAirticket_PriceDetail model = new SearchAirticket_PriceDetail
                                     {
-                                        decimal.TryParse(peo.fareAmount.ToString(), out childPrice);
-                                        decimal.TryParse(peo.multiplier.ToString(), out childCount);
-                                        decimal.TryParse(peo.serviceCharges[1].amount.ToString(), out childtaxPrice);
+                                        Currency = data.data.currencyCode //(CurrencyEnums)Enum.Parse(typeof(CurrencyEnums), data.data.currencyCode)
+                                    };
+                                    var q = 1;
+                                    decimal adtPrice = 0;
+                                    decimal adtCount = 0;
+                                    decimal adttaxPrice = 0;
+                                    decimal childPrice = 0;
+                                    decimal childCount = 0;
+                                    decimal childtaxPrice = 0;
+                                    foreach (var fare in faresList)
+                                    {
+                                        if (q > 1)
+                                        {
+                                            break;
+                                        }
+                                        q++;
+                                        var passengerFares = fare.Value.details.passengerFares;
+                                        foreach (var peo in passengerFares)
+                                        {
+                                            if (peo.passengerType == "ADT")
+                                            {
+                                                decimal.TryParse(peo.fareAmount.ToString(), out adtPrice);
+                                                decimal.TryParse(peo.multiplier.ToString(), out adtCount);
+                                                decimal.TryParse(peo.serviceCharges[1].amount.ToString(), out adttaxPrice);
+                                            }
+                                            else if (peo.passengerType == "CHD")
+                                            {
+                                                decimal.TryParse(peo.fareAmount.ToString(), out childPrice);
+                                                decimal.TryParse(peo.multiplier.ToString(), out childCount);
+                                                decimal.TryParse(peo.serviceCharges[1].amount.ToString(), out childtaxPrice);
+                                            }
+                                        }
                                     }
+                                    model.AdultPrice = adtPrice * adtCount;
+                                    model.AdultTax = adttaxPrice * adtCount;
+                                    model.ChildPrice = childPrice * childCount;
+                                    model.ChildTax = childtaxPrice * childCount;
+                                    model.NationalityType = NationalityApplicableType.All;
+                                    model.SuitAge = "0~99";
+                                    model.MaxFittableNum = 9;
+                                    model.MinFittableNum = 1;
+                                    model.TicketInvoiceType = 1; //没有默认1
+                                    model.TicketAirline = "NK";
+                                    List<AirticketRuleItem> refundRule = new List<AirticketRuleItem>();
+                                    refundRule.Add(new AirticketRuleItem
+                                    {
+                                        FlightStatus = FlightStatus.BeforeTakeOff,
+                                        Hours = 6 * 24,
+                                        Penalty = 119
+                                    });
+                                    refundRule.Add(new AirticketRuleItem
+                                    {
+                                        FlightStatus = FlightStatus.BeforeTakeOff,
+                                        Hours = 30 * 24,
+                                        Penalty = 99
+                                    });
+                                    refundRule.Add(new AirticketRuleItem
+                                    {
+                                        FlightStatus = FlightStatus.BeforeTakeOff,
+                                        Hours = 59 * 24,
+                                        Penalty = 69
+                                    });
+                                    refundRule.Add(new AirticketRuleItem
+                                    {
+                                        FlightStatus = FlightStatus.BeforeTakeOff,
+                                        Hours = 60 * 24,
+                                        Penalty = 0
+                                    });
+                                    SearchAirticket_Rule rule = new SearchAirticket_Rule
+                                    {
+                                        HasRefund = true, //设置可退
+                                        RefundRule = refundRule,
+                                        HasChangeDate = true, //设置可改
+                                        ChangeDateRule = refundRule,
+                                    };
+                                    model.Rule = rule;
+                                    model.DeliveryPolicy = "Standardproduct";
+                                    var rateCode = $"{cri.stations.originStationCodes.FirstOrDefault()}_{cri.stations.destinationStationCodes.FirstOrDefault()}_{cri.dates.beginDate}";
+                                    List<SearchAirticket_Segment> segList = new List<SearchAirticket_Segment>();
+                                    foreach (var segment in journey.segments)
+                                    {
+                                        var eq = segment.legs[0].legInfo.equipmentType.ToString();
+                                        SearchAirticket_Segment seg = new SearchAirticket_Segment()
+                                        {
+                                            Carrier = segment.identifier.carrierCode,
+                                            CabinClass = CabinClass.EconomyClass,
+                                            FlightNumber = segment.identifier.identifier,
+                                            DepAirport = segment.designator.origin,
+                                            ArrAirport = segment.designator.destination,
+                                            DepDate = Convert.ToDateTime(segment.designator.departure).ToString("yyyy-MM-dd HH:mm"),
+                                            ArrDate = Convert.ToDateTime(segment.designator.arrival).ToString("yyyy-MM-dd HH:mm"),
+                                            StopCities = segment.designator.destination,
+                                            CodeShare = segment.identifier.carrierCode == "NK" ? false : true,
+                                            ShareCarrier = segment.identifier.carrierCode == "NK" ? "" : segment.identifier.carrierCode,
+                                            ShareFlightNumber = segment.identifier.carrierCode == "NK" ? "" : segment.identifier.identifier,
+                                            AircraftCode = await GetAircraftCodeByEq(eq),
+                                            BaggageRule = await BuildBaggageRule()
+                                        };
+                                        segList.Add(seg);
+                                        rateCode += $"_{seg.Carrier}{seg.FlightNumber}_{Convert.ToDateTime(seg.DepDate).ToString("yyyyMMddHHmm")}";
+                                    }
+                                    if (i >= stepDto.FromSegments.Count)
+                                    {
+                                        model.RetSegments = segList;
+                                    }
+                                    else
+                                    {
+                                        model.FromSegments = segList;
+                                    }
+                                    model.RateCode = $"{rateCode}";
+                                    priceList.Add(model);
                                 }
                             }
-                            model.AdultPrice = adtPrice * adtCount;
-                            model.AdultTax = adttaxPrice * adtCount;
-                            model.ChildPrice = childPrice * childCount;
-                            model.ChildTax = childtaxPrice * childCount;
-                            model.NationalityType = NationalityApplicableType.All;
-                            model.SuitAge = "0~99";
-                            model.MaxFittableNum = 9;
-                            model.MinFittableNum = 1;
-                            model.TicketInvoiceType = 1; //没有默认1
-                            model.TicketAirline = "NK";
-                            List<AirticketRuleItem> refundRule = new List<AirticketRuleItem>();
-                            refundRule.Add(new AirticketRuleItem
+
+                            if (priceList.Count > 0)
                             {
-                                FlightStatus = FlightStatus.BeforeTakeOff,
-                                Hours = 6 * 24,
-                                Penalty = 119
-                            });
-                            refundRule.Add(new AirticketRuleItem
-                            {
-                                FlightStatus = FlightStatus.BeforeTakeOff,
-                                Hours = 30 * 24,
-                                Penalty = 99
-                            });
-                            refundRule.Add(new AirticketRuleItem
-                            {
-                                FlightStatus = FlightStatus.BeforeTakeOff,
-                                Hours = 59 * 24,
-                                Penalty = 69
-                            });
-                            refundRule.Add(new AirticketRuleItem
-                            {
-                                FlightStatus = FlightStatus.BeforeTakeOff,
-                                Hours = 60 * 24,
-                                Penalty = 0
-                            });
-                            SearchAirticket_Rule rule = new SearchAirticket_Rule
-                            {
-                                HasRefund = true, //设置可退
-                                RefundRule = refundRule,
-                                HasChangeDate = true, //设置可改
-                                ChangeDateRule = refundRule,
-                            };
-                            model.Rule = rule;
-                            model.DeliveryPolicy = "Standardproduct";
-                            var rateCode = $"{stepDto.startArea}_{stepDto.endArea}_{fromDate}";
-                            List<SearchAirticket_Segment> segList = new List<SearchAirticket_Segment>();
-                            foreach (var segment in journey.segments)
-                            {
-                                var eq = segment.legs[0].legInfo.equipmentType.ToString();
-                                SearchAirticket_Segment seg = new SearchAirticket_Segment()
+                                PriceDetailDict priceDetailDict = new PriceDetailDict()
                                 {
-                                    Carrier = segment.identifier.carrierCode,
-                                    CabinClass = CabinClass.EconomyClass,
-                                    FlightNumber = segment.identifier.identifier,
-                                    DepAirport = segment.designator.origin,
-                                    ArrAirport = segment.designator.destination,
-                                    DepDate = Convert.ToDateTime(segment.designator.departure).ToString("yyyy-MM-dd HH:mm"),
-                                    ArrDate = Convert.ToDateTime(segment.designator.arrival).ToString("yyyy-MM-dd HH:mm"),
-                                    StopCities = segment.designator.destination,
-                                    CodeShare = segment.identifier.carrierCode == "NK" ? false : true,
-                                    ShareCarrier = segment.identifier.carrierCode == "NK" ? "" : segment.identifier.carrierCode,
-                                    ShareFlightNumber = segment.identifier.carrierCode == "NK" ? "" : segment.identifier.identifier,
-                                    AircraftCode = await GetAircraftCodeByEq(eq),
-                                    BaggageRule = await BuildBaggageRule()
+                                    Detail = priceList,
+                                    Key = $"{cri.dates.beginDate}_{cri.stations.originStationCodes.FirstOrDefault()}_{cri.stations.destinationStationCodes.FirstOrDefault()}"
                                 };
-                                segList.Add(seg);
-                                rateCode += $"_{seg.Carrier}{seg.FlightNumber}_{Convert.ToDateTime(seg.DepDate).ToString("yyyyMMddHHmm")}";
+                                result.Add(priceDetailDict);
                             }
-                            if (stepDto.IsBack)
-                            {
-                                model.RetSegments = segList;
-                            }
-                            else
-                            {
-                                model.FromSegments = segList;
-                            }
-                            model.RateCode = $"{rateCode}";
-                            priceList.Add(model);
                         }
                     }
                 }
@@ -1258,8 +1400,8 @@ namespace NkFlightWeb.Service
             }
 
             stopwatch.Stop();
-            Log.Information($"Api:获取{priceList.Count}条数据耗时{stopwatch.ElapsedMilliseconds}ms");
-            return priceList;
+            Log.Information($"Api:获取{result.Count}条数据耗时{stopwatch.ElapsedMilliseconds}ms");
+            return result;
         }
 
         /// <summary>
@@ -1268,7 +1410,7 @@ namespace NkFlightWeb.Service
         /// <param name="stepDto"></param>
         /// <returns></returns>
         /// <exception cref="Exception"></exception>
-        public async Task<List<SearchAirticket_PriceDetail>> StepSearch(StepDto stepDto)
+        public async Task<List<SearchAirticket_PriceDetail>> StepSearch_Old(StepDto stepDto)
         {
             Stopwatch stopwatch = Stopwatch.StartNew();
             stopwatch.Start();
@@ -1516,10 +1658,9 @@ namespace NkFlightWeb.Service
                 catch (Exception ex)
                 {
                     Log.Error($"Api:请求发生错误，使用时间:{dbToken.UseTime}过期时间:{dbToken.PassTime}出错{ex.Message}");
-                    Log.Information($"Api:【{dbToken.Token}】【{dbToken.Cookies}】");
                     //当出现403 主动去获取token 重试3次
-                    //if (ex.Message.Contains("403") && i < 3)
-                    if (i < 3)
+                    if (ex.Message.Contains("403") && i < 3)
+                    //if (i < 3)
                     {
                         var token = await BuildToken();
                         Log.Error($"Api:403主动获取token{token}");
@@ -1541,7 +1682,6 @@ namespace NkFlightWeb.Service
             {
                 throw new Exception("找不到报价编码");
             }
-            var flyList = dto.Data.RateCode.Split("_").ToList();
             StepDto stepDto = new StepDto()
             {
                 adtSourceNum = dto.Data.AdultNum,
@@ -1679,9 +1819,38 @@ namespace NkFlightWeb.Service
                             AirlinePnrCode = item.AirlinePnrCode,
                         });
                     }
+                    List<NKAirlToSegment> segToList = new List<NKAirlToSegment>();
+                    foreach (var item in model.RetSegments)
+                    {
+                        segToList.Add(new NKAirlToSegment
+                        {
+                            OrderId = order.OrderId,
+                            RateCode = model.RateCode,
+                            Carrier = item.Carrier,
+                            Cabin = item.Cabin,
+                            CabinClass = item.CabinClass,
+                            FlightNumber = item.FlightNumber,
+                            DepAirport = item.DepAirport,
+                            ArrAirport = item.ArrAirport,
+                            DepDate = item.DepDate,
+                            ArrDate = item.ArrDate,
+                            StopCities = item.StopCities,
+                            CodeShare = item.CodeShare,
+                            ShareCarrier = item.ShareCarrier,
+                            ShareFlightNumber = item.ShareFlightNumber,
+                            AircraftCode = item.AircraftCode,
+                            Group = item.Group,
+                            FareBasis = item.FareBasis,
+                            GdsType = item.GdsType,
+                            PosArea = item.PosArea,
+                            //BaggageRule = item.BaggageRule,
+                            AirlinePnrCode = item.AirlinePnrCode,
+                        });
+                    }
                     await _repository.GetRepository<NKFlightOrder>().InsertAsync(order);
                     await _repository.GetRepository<NKAirlPassenger>().BatchInsertAsync(passengers);
                     await _repository.GetRepository<NKAirlSegment>().BatchInsertAsync(segList);
+                    await _repository.GetRepository<NKAirlToSegment>().BatchInsertAsync(segToList);
                     await transaction.CommitAsync();
                     return new CreateOrder_Data
                     {
@@ -1760,7 +1929,7 @@ namespace NkFlightWeb.Service
         {
             //打开查询接口
 
-            var order = await _repository.GetRepository<NKFlightOrder>().Query().Include(n => n.Segment).Include(n => n.NKAirlPassenger).FirstOrDefaultAsync(n => n.platOrderId == dto.Data.OrderId);
+            var order = await _repository.GetRepository<NKFlightOrder>().Query().Include(n => n.Segment).Include(n => n.ToSegment).Include(n => n.NKAirlPassenger).FirstOrDefaultAsync(n => n.platOrderId == dto.Data.OrderId);
             if (order == null)
             {
                 return new QueryOrder_Data
@@ -1796,6 +1965,33 @@ namespace NkFlightWeb.Service
                 };
                 segList.Add(seg);
             }
+            List<SearchAirticket_Segment> segToList = new List<SearchAirticket_Segment>();
+            foreach (var se in order.ToSegment)
+            {
+                SearchAirticket_Segment seg = new SearchAirticket_Segment
+                {
+                    Cabin = se.Cabin,
+                    Carrier = se.Carrier,
+                    CabinClass = se.CabinClass,
+                    FlightNumber = se.FlightNumber,
+                    DepAirport = se.DepAirport,
+                    ArrAirport = se.ArrAirport,
+                    DepDate = se.DepDate,
+                    ArrDate = se.ArrDate,
+                    StopCities = se.StopCities,
+                    CodeShare = se.CodeShare,
+                    ShareCarrier = se.ShareCarrier,
+                    ShareFlightNumber = se.ShareFlightNumber,
+                    AircraftCode = se.AircraftCode,
+                    Group = se.Group,
+                    FareBasis = se.FareBasis,
+                    GdsType = se.GdsType,
+                    PosArea = se.PosArea,
+                    AirlinePnrCode = se.AirlinePnrCode,
+                    BaggageRule = await BuildBaggageRule()
+                };
+                segToList.Add(seg);
+            }
             List<QueryOrder_Passenger> passengers = new List<QueryOrder_Passenger>();
             foreach (var dbPeo in order.NKAirlPassenger)
             {
@@ -1823,7 +2019,8 @@ namespace NkFlightWeb.Service
                 TotalPrice = order.SumPrice.Value,
                 Tax = order.TaxPrice.Value,
                 Passengers = passengers,
-                FromSegments = segList
+                FromSegments = segList,
+                RetSegments = segToList
             };
         }
 
